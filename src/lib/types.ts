@@ -1,0 +1,202 @@
+export type UserRole =
+  | "super_admin"
+  | "admin"
+  | "sales"
+  | "accountant"
+  | "inventory";
+
+export type ProductCategory =
+  | "Brand Perfumes"
+  | "Signature Brand"
+  | "Customized Perfumes"
+  | "Perfume Oils"
+  | "Oud Oils"
+  | "Itar"
+  | "Body Mist"
+  | "Roll-ons"
+  | "Deodorants"
+  | "Bakhoor"
+  | "Incense Burners"
+  | "Gift Boxes"
+  | "Perfume Sets"
+  | "Single Notes"
+  | "Mass Perfumes"
+  | "Packaging";
+
+export type StockUnit = "pcs" | "ml";
+export type StockBucket = "sellable" | "tester" | "sample" | "personal";
+
+export type PaymentMethod = "cash" | "card" | "bank" | "credit" | "mixed";
+
+export type QuotationStatus =
+  | "draft"
+  | "sent"
+  | "revised"
+  | "approved"
+  | "rejected"
+  | "expired";
+
+export interface Product {
+  id: string;
+  sku: string;
+  name: string;
+  nameAr?: string;
+  category: ProductCategory;
+  unit: StockUnit;
+  sellPrice: number;
+  minMarginPct: number;
+  costFifo: number;
+  stockSellable: number;
+  stockTester: number;
+  stockSample: number;
+  stockPersonal: number;
+  lowStockAt: number;
+  isQuickButton?: boolean;
+  tags?: string[];
+}
+
+export interface FifoLayer {
+  id: string;
+  productId: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseDate: string;
+  qtyRemaining: number;
+  unitCost: number;
+  currency: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  preferences: string[];
+  totalPurchases: number;
+  lastVisit: string;
+  creditBalance: number;
+  hasCustomFormula: boolean;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string;
+  currency: string;
+  creditLimit: number;
+  outstanding: number;
+  lastPurchase: string;
+  avgLeadDays: number;
+}
+
+export interface FormulaComponent {
+  productId: string;
+  productName: string;
+  qty: number;
+  unit: StockUnit;
+}
+
+export interface Formula {
+  id: string;
+  name: string;
+  type: "remix" | "custom" | "signature";
+  customerId?: string;
+  customerName?: string;
+  yieldMl: number;
+  components: FormulaComponent[];
+  notes?: string;
+  updatedAt: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  date: string;
+  status: "draft" | "ordered" | "received" | "partial";
+  currency: string;
+  total: number;
+  itemCount: number;
+}
+
+export interface Quotation {
+  id: string;
+  number: string;
+  customerName: string;
+  customerPhone: string;
+  status: QuotationStatus;
+  date: string;
+  expiry: string;
+  total: number;
+  items: number;
+}
+
+export interface SaleLine {
+  id: string;
+  productId: string;
+  name: string;
+  qty: number;
+  unit: StockUnit | "tola" | "half_tola" | "quarter_tola";
+  unitPrice: number;
+  lineType: "ready" | "remix" | "oil" | "refill" | "packaging";
+}
+
+export interface DashboardAlert {
+  id: string;
+  type: "low_stock" | "dead_stock" | "transfer" | "report";
+  title: string;
+  detail: string;
+  severity: "info" | "warning" | "critical";
+}
+
+export interface SalesPoint {
+  label: string;
+  retail: number;
+  wholesale: number;
+  remix: number;
+}
+
+export interface DashboardData {
+  stats: {
+    todaySales: number;
+    grossMarginPct: number;
+    remixSales: number;
+    lowStockCount: number;
+    fifoValue: number;
+    weekTotal: number;
+    todayExpenseTotal: number;
+    productCount: number;
+  };
+  salesTrend: SalesPoint[];
+  alerts: DashboardAlert[];
+  recentSales: { id: string; time: string; customer: string; type: string; total: number; payment: string }[];
+  lowStock: { id: string; name: string; stockSellable: number; lowStockAt: number; unit: StockUnit }[];
+  moduleRoadmap: { name: string; status: string; priority: number }[];
+}
+
+export interface Expense {
+  id: string;
+  date: string;
+  category: string;
+  detail: string;
+  amount: number;
+  status: "pending" | "approved" | "rejected";
+}
+
+export interface AppSettings {
+  id: string;
+  branchName: string;
+  currency: string;
+  uiLanguage: string;
+  invoiceLanguages: string;
+  qtyPrecision: number;
+  inventoryMethod: string;
+  workingHours: string;
+  fridayHours: string;
+  minMarginGuard: string;
+  currentUserName: string;
+  currentUserRole: string;
+  currentUserRoleLabel: string;
+  integrations: { name: string; status: string }[];
+  roles: { role: string; access: string[] }[];
+}

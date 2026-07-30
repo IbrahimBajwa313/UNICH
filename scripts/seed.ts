@@ -1,0 +1,685 @@
+import dns from "node:dns";
+import "dotenv/config";
+
+dns.setDefaultResultOrder("ipv4first");
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch {
+  // ignore
+}
+
+import mongoose from "mongoose";
+import { connectDB } from "../src/lib/db";
+import {
+  AppSettings,
+  Customer,
+  Expense,
+  FifoLayer,
+  Formula,
+  Product,
+  PurchaseOrder,
+  Quotation,
+  Sale,
+  Supplier,
+} from "../src/lib/models";
+
+async function clearAll() {
+  await Promise.all([
+    Product.deleteMany({}),
+    FifoLayer.deleteMany({}),
+    Customer.deleteMany({}),
+    Supplier.deleteMany({}),
+    Formula.deleteMany({}),
+    PurchaseOrder.deleteMany({}),
+    Quotation.deleteMany({}),
+    Sale.deleteMany({}),
+    Expense.deleteMany({}),
+    AppSettings.deleteMany({}),
+  ]);
+}
+
+async function seed() {
+  console.log("Connecting to MongoDB Atlas...");
+  await connectDB();
+  console.log("Connected. Clearing collections...");
+  await clearAll();
+
+  const products = await Product.insertMany([
+    {
+      sku: "BP-001",
+      name: "Aventus Inspired",
+      nameAr: "أفينتوس",
+      category: "Brand Perfumes",
+      unit: "pcs",
+      sellPrice: 280,
+      minMarginPct: 25,
+      costFifo: 145.5,
+      stockSellable: 18,
+      stockTester: 2,
+      stockSample: 6,
+      stockPersonal: 0,
+      lowStockAt: 5,
+      isQuickButton: true,
+      tags: ["woody", "fresh"],
+    },
+    {
+      sku: "SG-001",
+      name: "U-niche Noir",
+      nameAr: "يونيتش نوار",
+      category: "Signature Brand",
+      unit: "pcs",
+      sellPrice: 320,
+      minMarginPct: 35,
+      costFifo: 98.2,
+      stockSellable: 42,
+      stockTester: 3,
+      stockSample: 12,
+      stockPersonal: 1,
+      lowStockAt: 5,
+      isQuickButton: true,
+      tags: ["oud", "amber"],
+    },
+    {
+      sku: "PO-012",
+      name: "Oud Cambodi Oil",
+      nameAr: "عود كمبودي",
+      category: "Oud Oils",
+      unit: "ml",
+      sellPrice: 18.5,
+      minMarginPct: 40,
+      costFifo: 7.25,
+      stockSellable: 860,
+      stockTester: 40,
+      stockSample: 25,
+      stockPersonal: 10,
+      lowStockAt: 100,
+      isQuickButton: true,
+      tags: ["oud"],
+    },
+    {
+      sku: "SN-004",
+      name: "Rose Absolute",
+      category: "Single Notes",
+      unit: "ml",
+      sellPrice: 12,
+      minMarginPct: 30,
+      costFifo: 5.1,
+      stockSellable: 48,
+      stockTester: 5,
+      stockSample: 8,
+      stockPersonal: 0,
+      lowStockAt: 5,
+      tags: ["floral"],
+      lastSoldAt: new Date(Date.now() - 34 * 24 * 60 * 60 * 1000),
+    },
+    {
+      sku: "RM-STD",
+      name: "Remix 100ml Standard",
+      category: "Customized Perfumes",
+      unit: "pcs",
+      sellPrice: 150,
+      minMarginPct: 45,
+      costFifo: 42.8,
+      stockSellable: 0,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 0,
+      isQuickButton: true,
+      tags: ["remix"],
+    },
+    {
+      sku: "ETH-96",
+      name: "Ethanol 96%",
+      category: "Packaging",
+      unit: "ml",
+      sellPrice: 0,
+      minMarginPct: 0,
+      costFifo: 0.045,
+      stockSellable: 12400,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 2000,
+    },
+    {
+      sku: "BOT-100",
+      name: "Glass Bottle 100ml",
+      category: "Packaging",
+      unit: "pcs",
+      sellPrice: 8,
+      minMarginPct: 20,
+      costFifo: 2.4,
+      stockSellable: 320,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 50,
+    },
+    {
+      sku: "CAP-STD",
+      name: "Cap — Standard Gold",
+      category: "Packaging",
+      unit: "pcs",
+      sellPrice: 3,
+      minMarginPct: 20,
+      costFifo: 0.85,
+      stockSellable: 410,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 50,
+    },
+    {
+      sku: "ATM-STD",
+      name: "Atomizer",
+      category: "Packaging",
+      unit: "pcs",
+      sellPrice: 4,
+      minMarginPct: 20,
+      costFifo: 1.1,
+      stockSellable: 380,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 50,
+    },
+    {
+      sku: "COL-STD",
+      name: "Collar",
+      category: "Packaging",
+      unit: "pcs",
+      sellPrice: 2.5,
+      minMarginPct: 20,
+      costFifo: 0.6,
+      stockSellable: 355,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 50,
+    },
+    {
+      sku: "PCH-STD",
+      name: "Velvet Pouch",
+      category: "Packaging",
+      unit: "pcs",
+      sellPrice: 5,
+      minMarginPct: 25,
+      costFifo: 1.5,
+      stockSellable: 210,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 40,
+    },
+    {
+      sku: "BM-003",
+      name: "Citrus Mist 200ml",
+      category: "Body Mist",
+      unit: "pcs",
+      sellPrice: 65,
+      minMarginPct: 30,
+      costFifo: 22,
+      stockSellable: 4,
+      stockTester: 1,
+      stockSample: 3,
+      stockPersonal: 0,
+      lowStockAt: 5,
+      isQuickButton: true,
+    },
+    {
+      sku: "BK-002",
+      name: "Bakhoor Royal Mix",
+      category: "Bakhoor",
+      unit: "pcs",
+      sellPrice: 95,
+      minMarginPct: 35,
+      costFifo: 38,
+      stockSellable: 27,
+      stockTester: 0,
+      stockSample: 2,
+      stockPersonal: 0,
+      lowStockAt: 5,
+    },
+    {
+      sku: "PO-001",
+      name: "White Musk Oil",
+      category: "Perfume Oils",
+      unit: "ml",
+      sellPrice: 6.5,
+      minMarginPct: 40,
+      costFifo: 2.1,
+      stockSellable: 92,
+      stockTester: 10,
+      stockSample: 15,
+      stockPersonal: 5,
+      lowStockAt: 100,
+      isQuickButton: true,
+    },
+    {
+      sku: "GB-001",
+      name: "Gift Box — Duo",
+      category: "Gift Boxes",
+      unit: "pcs",
+      sellPrice: 45,
+      minMarginPct: 25,
+      costFifo: 12,
+      stockSellable: 56,
+      stockTester: 0,
+      stockSample: 0,
+      stockPersonal: 0,
+      lowStockAt: 10,
+    },
+  ]);
+
+  const bySku = Object.fromEntries(products.map((p) => [p.sku, p]));
+  const suppliers = await Supplier.insertMany([
+    {
+      name: "Al Rawdah Oils",
+      phone: "+971 4 250 1100",
+      currency: "AED",
+      creditLimit: 50000,
+      outstanding: 12400,
+      lastPurchase: new Date("2026-07-18"),
+      avgLeadDays: 5,
+    },
+    {
+      name: "Cambodia Direct",
+      phone: "+855 23 555 019",
+      currency: "USD",
+      creditLimit: 20000,
+      outstanding: 4800,
+      lastPurchase: new Date("2026-06-28"),
+      avgLeadDays: 18,
+    },
+    {
+      name: "Fragrance Hub",
+      phone: "+971 6 744 2211",
+      currency: "AED",
+      creditLimit: 35000,
+      outstanding: 8900,
+      lastPurchase: new Date("2026-07-10"),
+      avgLeadDays: 3,
+    },
+    {
+      name: "Packaging Gulf",
+      phone: "+971 4 881 0099",
+      currency: "AED",
+      creditLimit: 15000,
+      outstanding: 2100,
+      lastPurchase: new Date("2026-07-15"),
+      avgLeadDays: 4,
+    },
+  ]);
+  const [s1, s2, s3, s4] = suppliers;
+
+  for (const sku of [
+    "ETH-96",
+    "BOT-100",
+    "CAP-STD",
+    "ATM-STD",
+    "COL-STD",
+    "PCH-STD",
+    "BM-003",
+    "BK-002",
+    "GB-001",
+    "SG-001",
+    "SN-004",
+    "PO-001",
+  ]) {
+    const p = bySku[sku];
+    if (!p || p.stockSellable <= 0) continue;
+    await FifoLayer.create({
+      productId: p._id,
+      supplierId: s4._id,
+      supplierName: s4.name,
+      purchaseDate: new Date("2026-06-01"),
+      qtyRemaining: p.stockSellable,
+      unitCost: p.costFifo,
+      currency: "AED",
+    });
+  }
+
+  await FifoLayer.insertMany([
+    {
+      productId: bySku["PO-012"]._id,
+      supplierId: s1._id,
+      supplierName: s1.name,
+      purchaseDate: new Date("2026-05-12"),
+      qtyRemaining: 220,
+      unitCost: 6.8,
+      currency: "AED",
+    },
+    {
+      productId: bySku["PO-012"]._id,
+      supplierId: s2._id,
+      supplierName: s2.name,
+      purchaseDate: new Date("2026-06-28"),
+      qtyRemaining: 400,
+      unitCost: 7.4,
+      currency: "USD",
+    },
+    {
+      productId: bySku["PO-012"]._id,
+      supplierId: s1._id,
+      supplierName: s1.name,
+      purchaseDate: new Date("2026-07-18"),
+      qtyRemaining: 240,
+      unitCost: 7.55,
+      currency: "AED",
+    },
+    {
+      productId: bySku["BP-001"]._id,
+      supplierId: s3._id,
+      supplierName: s3.name,
+      purchaseDate: new Date("2026-06-02"),
+      qtyRemaining: 8,
+      unitCost: 142,
+      currency: "AED",
+    },
+    {
+      productId: bySku["BP-001"]._id,
+      supplierId: s3._id,
+      supplierName: s3.name,
+      purchaseDate: new Date("2026-07-10"),
+      qtyRemaining: 10,
+      unitCost: 148.5,
+      currency: "AED",
+    },
+  ]);
+
+  const customers = await Customer.insertMany([
+    {
+      name: "Fatima Al Mazrouei",
+      phone: "+971 50 123 4567",
+      email: "fatima@email.com",
+      preferences: ["Oud", "Amber", "Warm"],
+      totalPurchases: 4820,
+      lastVisit: new Date("2026-07-25"),
+      creditBalance: 0,
+      hasCustomFormula: true,
+    },
+    {
+      name: "Omar Hassan",
+      phone: "+971 55 987 1122",
+      preferences: ["Fresh", "Citrus"],
+      totalPurchases: 1260,
+      lastVisit: new Date("2026-07-22"),
+      creditBalance: 150,
+      hasCustomFormula: false,
+    },
+    {
+      name: "Noor Trading LLC",
+      phone: "+971 4 330 8899",
+      email: "orders@noortrading.ae",
+      preferences: ["Wholesale", "Gift Sets"],
+      totalPurchases: 28450,
+      lastVisit: new Date("2026-07-20"),
+      creditBalance: 3200,
+      hasCustomFormula: false,
+    },
+    {
+      name: "Sara Khalid",
+      phone: "+971 52 441 7788",
+      preferences: ["Floral", "Musk"],
+      totalPurchases: 890,
+      lastVisit: new Date("2026-07-27"),
+      creditBalance: 0,
+      hasCustomFormula: true,
+    },
+    {
+      name: "Walk-in Customer",
+      phone: "+971 58 220 3344",
+      preferences: [],
+      totalPurchases: 150,
+      lastVisit: new Date("2026-07-28"),
+      creditBalance: 0,
+      hasCustomFormula: false,
+    },
+  ]);
+  const [c1, , , c4] = customers;
+
+  await Formula.insertMany([
+    {
+      name: "Remix Standard 100ml",
+      type: "remix",
+      yieldMl: 100,
+      notes: "Default remix BOM — auto-applied on Remix sales",
+      components: [
+        { productId: "oil-base", productName: "Selected Oil Blend", qty: 20, unit: "ml" },
+        { productId: String(bySku["ETH-96"]._id), productName: "Ethanol 96%", qty: 80, unit: "ml" },
+        { productId: String(bySku["BOT-100"]._id), productName: "Glass Bottle 100ml", qty: 1, unit: "pcs" },
+        { productId: String(bySku["CAP-STD"]._id), productName: "Cap — Standard Gold", qty: 1, unit: "pcs" },
+        { productId: String(bySku["ATM-STD"]._id), productName: "Atomizer", qty: 1, unit: "pcs" },
+        { productId: String(bySku["COL-STD"]._id), productName: "Collar", qty: 1, unit: "pcs" },
+        { productId: String(bySku["PCH-STD"]._id), productName: "Velvet Pouch", qty: 1, unit: "pcs" },
+      ],
+    },
+    {
+      name: "Fatima — Amber Oud Custom",
+      type: "custom",
+      customerId: c1._id,
+      customerName: c1.name,
+      yieldMl: 100,
+      components: [
+        { productId: String(bySku["PO-012"]._id), productName: "Oud Cambodi Oil", qty: 12, unit: "ml" },
+        { productId: String(bySku["SN-004"]._id), productName: "Rose Absolute", qty: 5, unit: "ml" },
+        { productId: String(bySku["PO-001"]._id), productName: "White Musk Oil", qty: 3, unit: "ml" },
+        { productId: String(bySku["ETH-96"]._id), productName: "Ethanol 96%", qty: 80, unit: "ml" },
+      ],
+    },
+    {
+      name: "Sara — Soft Floral",
+      type: "custom",
+      customerId: c4._id,
+      customerName: c4.name,
+      yieldMl: 100,
+      components: [
+        { productId: String(bySku["SN-004"]._id), productName: "Rose Absolute", qty: 10, unit: "ml" },
+        { productId: String(bySku["PO-001"]._id), productName: "White Musk Oil", qty: 10, unit: "ml" },
+        { productId: String(bySku["ETH-96"]._id), productName: "Ethanol 96%", qty: 80, unit: "ml" },
+      ],
+    },
+    {
+      name: "U-niche Noir Concentrate",
+      type: "signature",
+      yieldMl: 1000,
+      notes: "In-house signature batch formula — Admin only",
+      components: [
+        { productId: String(bySku["PO-012"]._id), productName: "Oud Cambodi Oil", qty: 180, unit: "ml" },
+        { productId: String(bySku["PO-001"]._id), productName: "White Musk Oil", qty: 90, unit: "ml" },
+        { productId: String(bySku["SN-004"]._id), productName: "Rose Absolute", qty: 40, unit: "ml" },
+      ],
+    },
+  ]);
+
+  await PurchaseOrder.insertMany([
+    { supplierId: s1._id, supplierName: s1.name, date: new Date("2026-07-18"), status: "received", currency: "AED", total: 6200, itemCount: 4 },
+    { supplierId: s3._id, supplierName: s3.name, date: new Date("2026-07-10"), status: "received", currency: "AED", total: 14850, itemCount: 12 },
+    { supplierId: s4._id, supplierName: s4.name, date: new Date("2026-07-15"), status: "partial", currency: "AED", total: 3100, itemCount: 6 },
+    { supplierId: s2._id, supplierName: s2.name, date: new Date("2026-07-25"), status: "ordered", currency: "USD", total: 2800, itemCount: 2 },
+  ]);
+
+  await Quotation.insertMany([
+    { number: "QT-2026-018", customerName: "Noor Trading LLC", customerPhone: "+971 4 330 8899", status: "sent", date: new Date("2026-07-24"), expiry: new Date("2026-08-07"), total: 8600, items: 24 },
+    { number: "QT-2026-019", customerName: "Omar Hassan", customerPhone: "+971 55 987 1122", status: "draft", date: new Date("2026-07-27"), expiry: new Date("2026-08-10"), total: 420, items: 3 },
+    { number: "QT-2026-015", customerName: "Al Manara Gifts", customerPhone: "+971 50 666 2211", status: "approved", date: new Date("2026-07-12"), expiry: new Date("2026-07-26"), total: 12400, items: 40 },
+    { number: "QT-2026-011", customerName: "Boutique Luxe", customerPhone: "+971 4 991 3344", status: "expired", date: new Date("2026-06-20"), expiry: new Date("2026-07-04"), total: 5100, items: 15 },
+    { number: "QT-2026-017", customerName: "Fatima Al Mazrouei", customerPhone: "+971 50 123 4567", status: "revised", date: new Date("2026-07-22"), expiry: new Date("2026-08-05"), total: 780, items: 4 },
+  ]);
+
+  const now = new Date();
+  const day = (offset: number, hour: number, minute: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - offset);
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  };
+
+  type SaleSeed = {
+    createdAt: Date;
+    customerPhone: string;
+    customerName: string;
+    payment: string;
+    saleType: string;
+    total: number;
+    subtotal: number;
+    lines: Array<Record<string, unknown>>;
+  };
+
+  const salesSeed: SaleSeed[] = [
+    {
+      createdAt: day(0, 14, 22),
+      customerPhone: "+971 52 441 7788",
+      customerName: "Sara Khalid",
+      payment: "card",
+      saleType: "Remix",
+      total: 150,
+      subtotal: 150,
+      lines: [{ productId: bySku["RM-STD"]._id, name: "Remix 100ml Standard", qty: 1, unitLabel: "pcs", unitPrice: 150, lineType: "remix" }],
+    },
+    {
+      createdAt: day(0, 13, 48),
+      customerPhone: "+971 58 220 3344",
+      customerName: "Walk-in",
+      payment: "cash",
+      saleType: "Retail",
+      total: 280,
+      subtotal: 280,
+      lines: [{ productId: bySku["BP-001"]._id, name: "Aventus Inspired", qty: 1, unitLabel: "pcs", unitPrice: 280, lineType: "ready" }],
+    },
+    {
+      createdAt: day(0, 12, 10),
+      customerPhone: "+971 55 987 1122",
+      customerName: "Omar Hassan",
+      payment: "mixed",
+      saleType: "Oil",
+      total: 222,
+      subtotal: 222,
+      lines: [{ productId: bySku["PO-012"]._id, name: "Oud Cambodi Oil", qty: 1, unitLabel: "1 Tola", unitPrice: 222, lineType: "oil", deductMl: 12 }],
+    },
+    {
+      createdAt: day(0, 11, 5),
+      customerPhone: "+971 4 330 8899",
+      customerName: "Noor Trading LLC",
+      payment: "credit",
+      saleType: "Wholesale",
+      total: 4200,
+      subtotal: 4200,
+      lines: [{ productId: bySku["SG-001"]._id, name: "U-niche Noir", qty: 10, unitLabel: "pcs", unitPrice: 280, lineType: "wholesale" }],
+    },
+    {
+      createdAt: day(0, 10, 32),
+      customerPhone: "+971 50 123 4567",
+      customerName: "Fatima Al Mazrouei",
+      payment: "bank",
+      saleType: "Refill",
+      total: 135,
+      subtotal: 135,
+      lines: [{ productId: bySku["PO-012"]._id, name: "Oud Cambodi Oil", qty: 1, unitLabel: "100ml refill", unitPrice: 135, lineType: "refill", deductMl: 100 }],
+    },
+  ];
+
+  const mix = [
+    { retail: 4200, wholesale: 1800, remix: 960 },
+    { retail: 3800, wholesale: 2200, remix: 1100 },
+    { retail: 5100, wholesale: 900, remix: 1400 },
+    { retail: 4600, wholesale: 3100, remix: 880 },
+    { retail: 2900, wholesale: 1500, remix: 720 },
+    { retail: 6400, wholesale: 800, remix: 1680 },
+    { retail: 5800, wholesale: 1200, remix: 1520 },
+  ];
+
+  for (let i = 0; i < mix.length; i++) {
+    const offset = mix.length - 1 - i;
+    const m = mix[i];
+    salesSeed.push(
+      {
+        createdAt: day(offset, 16, 0),
+        customerPhone: "+971 58 220 3344",
+        customerName: "Walk-in",
+        payment: "cash",
+        saleType: "Retail",
+        total: m.retail,
+        subtotal: m.retail,
+        lines: [{ productId: bySku["BP-001"]._id, name: "Retail Mix", qty: 1, unitLabel: "pcs", unitPrice: m.retail, lineType: "ready" }],
+      },
+      {
+        createdAt: day(offset, 15, 0),
+        customerPhone: "+971 4 330 8899",
+        customerName: "Noor Trading LLC",
+        payment: "credit",
+        saleType: "Wholesale",
+        total: m.wholesale,
+        subtotal: m.wholesale,
+        lines: [{ productId: bySku["SG-001"]._id, name: "Wholesale Mix", qty: 1, unitLabel: "pcs", unitPrice: m.wholesale, lineType: "wholesale" }],
+      },
+      {
+        createdAt: day(offset, 14, 0),
+        customerPhone: "+971 52 441 7788",
+        customerName: "Sara Khalid",
+        payment: "card",
+        saleType: "Remix",
+        total: m.remix,
+        subtotal: m.remix,
+        lines: [{ productId: bySku["RM-STD"]._id, name: "Remix Mix", qty: 1, unitLabel: "pcs", unitPrice: m.remix, lineType: "remix" }],
+      },
+    );
+  }
+
+  for (const s of salesSeed) {
+    await Sale.create({ ...s, status: "completed" });
+  }
+
+  await Expense.insertMany([
+    { date: new Date("2026-07-28"), category: "Petty Cash", detail: "Cleaning supplies", amount: 85, status: "approved" },
+    { date: new Date("2026-07-27"), category: "Utilities", detail: "DEWA estimate", amount: 620, status: "pending" },
+    { date: new Date("2026-07-26"), category: "Marketing", detail: "Instagram boost", amount: 250, status: "approved" },
+    { date: new Date("2026-07-25"), category: "Packaging", detail: "Courier labels", amount: 40, status: "approved" },
+  ]);
+
+  await AppSettings.create({
+    key: "default",
+    branchName: "Main Store — Dubai",
+    currency: "AED",
+    uiLanguage: "English",
+    invoiceLanguages: "English + Arabic",
+    qtyPrecision: 3,
+    inventoryMethod: "FIFO",
+    workingHours: "10:00 – 22:00",
+    fridayHours: "16:30 – 22:00",
+    minMarginGuard: "Admin password required",
+    currentUserName: "Ahmad Ibrahim",
+    currentUserRole: "admin",
+    currentUserRoleLabel: "Admin",
+    pettyCashFloat: 500,
+    integrations: [
+      { name: "Shopify", status: "Planned" },
+      { name: "WhatsApp", status: "Planned" },
+      { name: "Email", status: "Planned" },
+      { name: "Tally / Accounting", status: "Planned" },
+      { name: "Payment Gateway", status: "Future" },
+      { name: "Claude AI", status: "Explore" },
+    ],
+    roles: [
+      { role: "Super Admin", access: ["Full system", "Branches", "Integrations", "User management"] },
+      { role: "Admin", access: ["Formulas", "Pricing overrides", "Transfers", "Profit reports"] },
+      { role: "Sales Staff", access: ["POS", "Quotations", "Customers", "No formula view"] },
+      { role: "Accountant", access: ["Expenses", "Reports", "Payables", "Cash closing"] },
+      { role: "Inventory", access: ["Stock", "Purchases", "Transfers request", "Excel import"] },
+    ],
+  });
+
+  console.log("Seed complete:");
+  console.log(`  Products: ${products.length}`);
+  console.log(`  Suppliers: ${suppliers.length}`);
+  console.log(`  Customers: ${customers.length}`);
+  console.log(`  Sales: ${salesSeed.length}`);
+  await mongoose.disconnect();
+}
+
+seed().catch(async (err) => {
+  console.error("Seed failed:", err);
+  await mongoose.disconnect().catch(() => undefined);
+  process.exit(1);
+});
