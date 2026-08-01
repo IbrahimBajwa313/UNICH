@@ -542,9 +542,20 @@ export async function assertStockAvailable(deductions: DeductionNeed[]) {
   const [products, fifoRows] = await Promise.all([
     Product.find({ _id: { $in: ids } })
       .select("name stockSellable")
-      .lean<Array<{ _id: mongoose.Types.ObjectId; name: string; stockSellable: number }>>(),
+      .lean<
+        Array<{
+          _id: mongoose.Types.ObjectId;
+          name: string;
+          stockSellable: number;
+        }>
+      >(),
     FifoLayer.aggregate<{ _id: mongoose.Types.ObjectId; total: number }>([
-      { $match: { productId: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) }, qtyRemaining: { $gt: 0 } } },
+      {
+        $match: {
+          productId: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) },
+          qtyRemaining: { $gt: 0 },
+        },
+      },
       { $group: { _id: "$productId", total: { $sum: "$qtyRemaining" } } },
     ]),
   ]);
@@ -573,3 +584,58 @@ export async function assertStockAvailable(deductions: DeductionNeed[]) {
     }
   }
 }
+
+const FAST_LINE_TYPES = new Set(["ready", "packaging", "wholesale"]);
+
+/**
+ * Zero-DB validation for standard retail lines (ready / packaging / wholesale).
+ * Prices/names come from the live POS cart (already loaded from inventory).
+ * Returns null when any line needs full server validation (remix/oil/refill).
+ */
+export function tryFastValidateSaleLines(
+  rawLines: IncomingSaleLine[],
+): SaleValidationResult | null {
+  if (!Array.isArray(rawLines) || rawLines.length === 0) return null;
+
+  for (const raw of rawLines) {
+    if (!FAST_LINE_TYPES.has(raw.lineType)) return null;
+    if (!raw.productId || !mongoose.isValidObjectId(raw.productId)) return null;
+    const qty = Number(raw.qty);
+    if (!Number.isFinite(qty) || qty <= 0) return null;
+    const unitPrice = Number(raw.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
+  }
+
+  const lines: ValidatedSaleLine[] = [];
+  const deductions: DeductionNeed[] = [];
+  let subtotal = 0;
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i];
+    const qty = Number(raw.qty);
+    const unitPrice = Number(raw.unitPrice);
+    const name = (raw.name || "").trim() || "Item";
+    const lineType = raw.lineType as ValidatedSaleLine["lineType"];
+
+    lines.push({
+      productId: raw.productId,
+      name,
+      qty,
+      unitLabel: raw.unitLabel || "pcs",
+      unitPrice,
+      lineType,
+      bomNote: raw.bomNote,
+    });
+    deductions.push({
+      productId: raw.productId!,
+      productName: name,
+      qty,
+      reason: lineType,
+      lineIndex: i,
+    });
+    subtotal += qty * unitPrice;
+  }
+
+  return { lines, deductions, subtotal };
+}
+

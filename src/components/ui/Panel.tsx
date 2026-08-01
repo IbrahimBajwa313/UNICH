@@ -25,8 +25,8 @@ export function PanelHeader({
   subtitle,
   action,
 }: {
-  title: string;
-  subtitle?: string;
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (

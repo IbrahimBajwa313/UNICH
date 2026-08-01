@@ -3,6 +3,7 @@ export { SaleError } from "@/lib/sales/errors";
 export {
   validateRemixSale,
   validateSaleLines,
+  tryFastValidateSaleLines,
   assertStockAvailable,
 } from "@/lib/sales/validateSale";
 export {

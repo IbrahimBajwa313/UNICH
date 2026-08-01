@@ -413,17 +413,32 @@ export default function PosPage() {
     }
     setCheckingOut(true);
     const idempotencyKey = createIdempotencyKey();
+    const snapshot = {
+      cart,
+      packagingPick,
+      customerName: customerName.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      payment,
+      subtotal,
+    };
+    // Clear cart immediately (same feel as Hold) — restore if save fails
+    setCart([]);
+    setPackagingPick({});
+    setCustomerName("");
+    setPhone("");
+    setEmail("");
     try {
       const sale = await api<{ id: string; total?: number }>("/api/sales", {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
-          customerPhone: phone,
-          customerName: customerName.trim() || undefined,
+          customerPhone: snapshot.phone,
+          customerName: snapshot.customerName || undefined,
           salesperson,
-          payment,
+          payment: snapshot.payment,
           idempotencyKey,
-          lines: cart.map((line) => ({
+          lines: snapshot.cart.map((line) => ({
             productId: line.product.id,
             name: line.product.name,
             qty: line.qty,
@@ -438,27 +453,26 @@ export default function PosPage() {
       });
       const completed: LastSale = {
         id: sale.id,
-        total: sale.total ?? subtotal,
-        customerName: customerName.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
-        payment,
+        total: sale.total ?? snapshot.subtotal,
+        customerName: snapshot.customerName,
+        phone: snapshot.phone,
+        email: snapshot.email,
+        payment: snapshot.payment,
       };
       setLastSale(completed);
-      flash(`Sale completed · ${formatMoney(subtotal)} · ${payment}`);
-      setCart([]);
-      setPackagingPick({});
-      setCustomerName("");
-      setPhone("");
-      setEmail("");
-      // Held list is small; defer full inventory reload so it doesn't contend with
-      // receipt print / the next checkout on a high-latency Atlas link.
+      flash(`Sale completed · ${formatMoney(snapshot.subtotal)} · ${snapshot.payment}`);
       void reloadHeld();
       if (settings.data?.autoPrintReceipt !== false) {
         void printSale(completed, defaultFormat, false);
       }
-      window.setTimeout(() => void reload(), 2000);
+      window.setTimeout(() => void reload(), 2500);
     } catch (err) {
+      setCart(snapshot.cart);
+      setPackagingPick(snapshot.packagingPick);
+      setCustomerName(snapshot.customerName);
+      setPhone(snapshot.phone);
+      setEmail(snapshot.email);
+      setPayment(snapshot.payment);
       flash(err instanceof Error ? err.message : "Could not complete sale", 6000, "err");
     } finally {
       setCheckingOut(false);
