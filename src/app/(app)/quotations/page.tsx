@@ -22,13 +22,15 @@ const statuses: QuotationStatus[] = [
 export default function QuotationsPage() {
   const [filter, setFilter] = useState<QuotationStatus | "all">("all");
   const [toast, setToast] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<"ok" | "err">("ok");
   const { data: quotations, loading, error, reload } = useApiData<Quotation[]>(`/api/quotations?status=${filter}`);
   const [draft, setDraft] = useState<Partial<Quotation> | null>(null);
   const rows = quotations ?? [];
 
-  function flash(msg: string) {
+  function flash(msg: string, ms = 2000, tone: "ok" | "err" = "ok") {
+    setToastTone(tone);
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2000);
+    window.setTimeout(() => setToast(null), ms);
   }
   async function setStatus(id: string, status: QuotationStatus) {
     try { await api(`/api/quotations/${id}`, { method: "PUT", body: JSON.stringify({ status }) }); await reload(); }
@@ -43,6 +45,52 @@ export default function QuotationsPage() {
     try { await api("/api/quotations", { method: "POST", body: JSON.stringify({ ...draft, total: Number(draft.total || 0), items: Number(draft.items || 0) }) }); setDraft(null); await reload(); }
     catch (err) { flash(err instanceof Error ? err.message : "Could not create quotation"); }
   }
+
+  async function shareQuotation(q: Quotation) {
+    try {
+      const res = await api<{
+        whatsapp?: { ok: boolean; url?: string; error?: string };
+        email?: { ok: boolean; to?: string; error?: string };
+      }>("/api/notifications/send", {
+        method: "POST",
+        body: JSON.stringify({
+          channel: "both",
+          kind: "quotation",
+          toPhone: q.customerPhone,
+          customerName: q.customerName,
+          total: q.total,
+          quotation: {
+            number: q.number,
+            items: q.items,
+            date: q.date,
+            expiry: q.expiry,
+          },
+        }),
+      });
+
+      if (!res.email?.ok) {
+        flash(
+          `EMAIL FAILED: ${res.email?.error || "Add customer email in CRM (test: jezra6127@gmail.com)"}`,
+          8000,
+          "err",
+        );
+        return;
+      }
+
+      if (res.whatsapp?.url) {
+        window.open(res.whatsapp.url, "_blank", "noopener,noreferrer");
+      }
+
+      flash(`Email sent to ${res.email.to} · WhatsApp opened`, 6000, "ok");
+      if (q.status === "draft") await setStatus(q.id, "sent");
+    } catch (err) {
+      flash(
+        err instanceof Error ? err.message : "Could not share quotation",
+        8000,
+        "err",
+      );
+    }
+  }
   if (loading) return <LoadingState label="Loading quotations…" />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
 
@@ -56,7 +104,13 @@ export default function QuotationsPage() {
       />
 
       {toast ? (
-        <div className="mb-4 rounded-lg border border-sage/30 bg-sage-soft px-4 py-2 text-sm text-sage">
+        <div
+          className={`mb-4 rounded-lg border px-4 py-2 text-sm ${
+            toastTone === "err"
+              ? "border-rose-400/40 bg-rose-500/10 text-rose-700"
+              : "border-sage/30 bg-sage-soft text-sage"
+          }`}
+        >
           {toast}
         </div>
       ) : null}
@@ -126,7 +180,7 @@ export default function QuotationsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => flash("Shared via WhatsApp")}
+                      onClick={() => void shareQuotation(q)}
                     >
                       <MessageCircle className="h-3.5 w-3.5" />
                     </Button>

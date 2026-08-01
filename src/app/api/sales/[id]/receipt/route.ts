@@ -1,0 +1,38 @@
+import { NextResponse } from "next/server";
+import { parseFormat, receiptDocForSale } from "@/lib/receipt/server";
+import { renderReceiptHtml } from "@/lib/receipt/template";
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function GET(req: Request, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    const { searchParams } = new URL(req.url);
+    const format = parseFormat(searchParams.get("format"));
+    const reprint = searchParams.get("reprint") === "1";
+
+    const doc = await receiptDocForSale(id, { reprint });
+    if (!doc) {
+      return NextResponse.json({ error: "Sale not found" }, { status: 404 });
+    }
+
+    if (searchParams.get("as") === "json") {
+      return NextResponse.json(doc);
+    }
+
+    return new Response(renderReceiptHtml(doc, format), {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to render receipt",
+      },
+      { status: 500 },
+    );
+  }
+}

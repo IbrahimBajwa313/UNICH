@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
-import { deductFifo } from "@/lib/inventory";
-import { Customer, Formula, Product, Sale } from "@/lib/models";
+import { Sale } from "@/lib/models";
+import { createSale } from "@/lib/sales/createSale";
+import { SaleError } from "@/lib/sales/errors";
 import { toJSON, toJSONList } from "@/lib/serialize";
 
 function mapSale(s: Record<string, unknown>) {
@@ -28,9 +28,15 @@ export async function GET(req: Request) {
     await connectDB();
     const { searchParams } = new URL(req.url);
     const limit = Number(searchParams.get("limit") || 20);
-    const sales = await Sale.find({ status: "completed" })
+    const status = searchParams.get("status") || "completed";
+    const filter =
+      status === "all"
+        ? {}
+        : { status: status as "completed" | "held" | "void" };
+    const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
-      .limit(limit);
+      .limit(limit)
+      .lean();
     return NextResponse.json(toJSONList(sales).map(mapSale));
   } catch (error) {
     return NextResponse.json(
@@ -42,103 +48,32 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    await connectDB();
     const body = await req.json();
-    const {
-      customerPhone,
-      customerName,
-      payment,
-      lines,
-      status = "completed",
-    } = body;
-
-    if (!customerPhone?.trim()) {
-      throw new Error("Customer phone is required");
-    }
-    if (!Array.isArray(lines) || lines.length === 0) {
-      throw new Error("At least one line item is required");
-    }
-
-    const subtotal = lines.reduce(
-      (s: number, l: { qty: number; unitPrice: number }) =>
-        s + Number(l.qty) * Number(l.unitPrice),
-      0,
-    );
-
-    if (status === "completed") {
-      for (const line of lines) {
-        const qty = Number(line.qty);
-        if (line.lineType === "ready" || line.lineType === "wholesale") {
-          if (!line.productId) continue;
-          await deductFifo(line.productId, qty);
-        } else if (line.lineType === "oil" || line.lineType === "refill") {
-          if (!line.productId) continue;
-          const ml = Number(line.deductMl || 0) * qty;
-          if (ml > 0) await deductFifo(line.productId, ml);
-        } else if (line.lineType === "remix") {
-          const remixFormula = await Formula.findOne({ type: "remix" });
-          if (remixFormula) {
-            for (const comp of remixFormula.components) {
-              if (comp.productId === "oil-base") continue;
-              if (!mongoose.isValidObjectId(comp.productId)) continue;
-              await deductFifo(comp.productId, comp.qty * qty);
-            }
-          }
-          if (line.oilProductId && line.oilMl) {
-            await deductFifo(line.oilProductId, Number(line.oilMl) * qty);
-          } else {
-            const defaultOil = await Product.findOne({ sku: "PO-012" });
-            if (defaultOil) await deductFifo(defaultOil._id, 20 * qty);
-          }
-        }
-      }
-    }
-
-    let customer = await Customer.findOne({ phone: customerPhone.trim() });
-    if (!customer) {
-      customer = await Customer.create({
-        name: customerName || "Walk-in Customer",
-        phone: customerPhone.trim(),
-        preferences: [],
-        totalPurchases: 0,
-        creditBalance: 0,
-      });
-    }
-
-    if (status === "completed") {
-      customer.totalPurchases += subtotal;
-      customer.lastVisit = new Date();
-      if (payment === "credit") {
-        customer.creditBalance += subtotal;
-      }
-      await customer.save();
-    }
-
-    const types = new Set(lines.map((l: { lineType: string }) => l.lineType));
-    let saleType = "Retail";
-    if (types.has("remix")) saleType = "Remix";
-    else if (types.has("oil")) saleType = "Oil";
-    else if (types.has("refill")) saleType = "Refill";
-    else if (types.has("wholesale")) saleType = "Wholesale";
-    else if (types.size > 1) saleType = "Mixed";
-
-    const sale = await Sale.create({
-      customerPhone: customerPhone.trim(),
-      customerName: customer.name,
-      customerId: customer._id,
-      payment,
-      status,
-      lines,
-      subtotal,
-      total: subtotal,
-      saleType,
+    const headerKey = req.headers.get("idempotency-key") || undefined;
+    const { sale, deduplicated } = await createSale({
+      customerPhone: body.customerPhone,
+      customerName: body.customerName,
+      salesperson: body.salesperson,
+      payment: body.payment,
+      lines: body.lines,
+      status: body.status,
+      idempotencyKey: body.idempotencyKey || headerKey,
     });
 
-    return NextResponse.json(mapSale(toJSON(sale)!), { status: 201 });
-  } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create sale" },
-      { status: 400 },
+      { ...mapSale(toJSON(sale)!), deduplicated },
+      { status: deduplicated ? 200 : 201 },
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to create sale";
+    const status = error instanceof SaleError ? 400 : 400;
+    return NextResponse.json(
+      {
+        error: message,
+        code: error instanceof SaleError ? error.code : "UNKNOWN",
+      },
+      { status },
     );
   }
 }

@@ -1,7 +1,58 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { AppSettings } from "@/lib/models";
+import { smsConfigured } from "@/lib/notifications/sms";
 import { toJSON } from "@/lib/serialize";
+
+function normalizeSalespeople(value: unknown, fallbackName?: string) {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/\n|,/)
+      : [];
+  const names = Array.from(
+    new Set(
+      list
+        .map((name) => String(name ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+  if (names.length > 0) return names;
+  const fallback = String(fallbackName || "Ahmad Ibrahim").trim();
+  return fallback ? [fallback] : ["Ahmad Ibrahim"];
+}
+
+function normalizeActiveSalesperson(
+  value: unknown,
+  salespeople: string[],
+  fallbackName?: string,
+) {
+  const requested = String(value ?? "").trim();
+  const matched = salespeople.find(
+    (name) => name.toLowerCase() === requested.toLowerCase(),
+  );
+  if (matched) return matched;
+  return salespeople[0] || String(fallbackName || "Ahmad Ibrahim").trim();
+}
+
+function withSalesTeamDefaults(json: Record<string, unknown>) {
+  const salespeople = normalizeSalespeople(
+    json.salespeople,
+    String(json.currentUserName || ""),
+  );
+  const activeSalesperson = normalizeActiveSalesperson(
+    json.activeSalesperson,
+    salespeople,
+    String(json.currentUserName || ""),
+  );
+  return {
+    ...json,
+    salespeople,
+    activeSalesperson,
+    // Env-derived, never persisted — lets the POS enable/disable the SMS action.
+    smsConfigured: smsConfigured(),
+  };
+}
 
 export async function GET() {
   try {
@@ -10,7 +61,7 @@ export async function GET() {
     if (!settings) {
       settings = await AppSettings.create({ key: "default" });
     }
-    return NextResponse.json(toJSON(settings));
+    return NextResponse.json(withSalesTeamDefaults(toJSON(settings)!));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to load settings" },
@@ -22,13 +73,36 @@ export async function GET() {
 export async function PUT(req: Request) {
   try {
     await connectDB();
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, unknown>;
+    const salespeople = normalizeSalespeople(
+      body.salespeople,
+      typeof body.currentUserName === "string" ? body.currentUserName : undefined,
+    );
+    const activeSalesperson = normalizeActiveSalesperson(
+      body.activeSalesperson,
+      salespeople,
+      typeof body.currentUserName === "string" ? body.currentUserName : undefined,
+    );
+
+    const rest = { ...body };
+    delete rest.id;
+    delete rest._id;
+    delete rest.__v;
+    delete rest.key;
+    delete rest.smsConfigured;
+
     const settings = await AppSettings.findOneAndUpdate(
       { key: "default" },
-      { $set: body },
+      {
+        $set: {
+          ...rest,
+          salespeople,
+          activeSalesperson,
+        },
+      },
       { returnDocument: "after", upsert: true, runValidators: true },
     );
-    return NextResponse.json(toJSON(settings));
+    return NextResponse.json(withSalesTeamDefaults(toJSON(settings)!));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update settings" },

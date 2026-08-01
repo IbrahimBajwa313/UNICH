@@ -18,7 +18,7 @@ export async function GET(req: Request) {
         { category: { $regex: q, $options: "i" } },
       ];
     }
-    const products = await Product.find(filter).sort({ name: 1 });
+    const products = await Product.find(filter).sort({ name: 1 }).lean();
     return NextResponse.json(toJSONList(products));
   } catch (error) {
     return NextResponse.json(

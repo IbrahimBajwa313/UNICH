@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx src/lib/sales/run-tests.ts",
     "db:seed": "tsx --env-file=.env scripts/seed.ts",
-    "db:health": "tsx --env-file=.env scripts/health.ts"
+    "db:health": "tsx --env-file=.env scripts/health.ts",
+    "receipt:preview": "tsx scripts/receipt-preview.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -16,13 +18,16 @@
     "mongoose": "^9.8.1",
     "next": "16.2.12",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "resend": "^6.18.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/xlsx": "^0.0.35",
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",

@@ -32,7 +32,7 @@ const tracks = [
       "Cash / card / bank / credit / mixed",
       "Hold & resume bill",
       "Remix, oil-by-tola, refill flows",
-      "Phone capture · WhatsApp / print stubs",
+      "Receipts: 80mm / A4 print, WhatsApp, email, SMS",
     ],
   },
   {
@@ -46,7 +46,7 @@ const tracks = [
       "FIFO purchase layers",
       "Low stock thresholds",
       "ml ↔ tola conversions",
-      "Excel import/export hooks",
+      "Excel import/export (staging + undo)",
     ],
   },
   {

@@ -25,6 +25,18 @@ export type ProductCategory =
 
 export type StockUnit = "pcs" | "ml";
 export type StockBucket = "sellable" | "tester" | "sample" | "personal";
+export type ItemType = "finished" | "packaging" | "raw";
+export type Concentration =
+  | "EDT"
+  | "EDP"
+  | "Extrait"
+  | "Parfum"
+  | "Oil"
+  | "Mist"
+  | "Other";
+
+export type ImportRowAction = "create" | "update" | "error";
+export type ImportBatchStatus = "staged" | "committed" | "undone";
 
 export type PaymentMethod = "cash" | "card" | "bank" | "credit" | "mixed";
 
@@ -44,8 +56,17 @@ export interface Product {
   category: ProductCategory;
   unit: StockUnit;
   sellPrice: number;
+  wholesalePrice?: number;
   minMarginPct: number;
   costFifo: number;
+  brand?: string;
+  concentration?: string;
+  gender?: string;
+  size?: string;
+  collection?: string;
+  notes?: string;
+  itemType?: ItemType;
+  importBatchId?: string | null;
   stockSellable: number;
   stockTester: number;
   stockSample: number;
@@ -53,6 +74,27 @@ export interface Product {
   lowStockAt: number;
   isQuickButton?: boolean;
   tags?: string[];
+}
+
+export interface ImportBatchRow {
+  rowNumber: number;
+  action: ImportRowAction;
+  sku: string;
+  payload?: Record<string, unknown>;
+  errorReason?: string;
+  priceFloorViolation?: boolean;
+}
+
+export interface ImportBatchSummary {
+  batchId: string;
+  fileName: string;
+  status: ImportBatchStatus;
+  total: number;
+  created: number;
+  updated: number;
+  failed: number;
+  priceFloorCount: number;
+  rows: ImportBatchRow[];
 }
 
 export interface FifoLayer {
@@ -183,6 +225,26 @@ export interface Expense {
   status: "pending" | "approved" | "rejected";
 }
 
+export type DeliveryChannel = "print" | "email" | "whatsapp" | "sms";
+export type DeliveryKind = "receipt" | "quotation" | "custom";
+export type DeliveryStatus = "sent" | "failed" | "handoff" | "printed";
+
+export interface DeliveryLogEntryRecord {
+  id: string;
+  channel: DeliveryChannel;
+  kind: DeliveryKind;
+  status: DeliveryStatus;
+  saleId?: string;
+  quotationId?: string;
+  receiptNo: string;
+  to: string;
+  format: string;
+  providerId: string;
+  error: string;
+  preview: string;
+  createdAt: string;
+}
+
 export interface AppSettings {
   id: string;
   branchName: string;
@@ -194,9 +256,22 @@ export interface AppSettings {
   workingHours: string;
   fridayHours: string;
   minMarginGuard: string;
+  storeLegalName: string;
+  storeAddress: string;
+  storePhone: string;
+  storeTaxNumber: string;
+  receiptLogoUrl: string;
+  receiptFooter: string;
+  vatPercent: number;
+  receiptFormat: "thermal" | "a4";
+  autoPrintReceipt: boolean;
+  /** Read-only: whether SMS credentials are present on the server. */
+  smsConfigured?: boolean;
   currentUserName: string;
   currentUserRole: string;
   currentUserRoleLabel: string;
+  salespeople: string[];
+  activeSalesperson: string;
   integrations: { name: string; status: string }[];
   roles: { role: string; access: string[] }[];
 }

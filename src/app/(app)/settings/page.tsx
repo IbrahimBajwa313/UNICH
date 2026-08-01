@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
@@ -8,21 +10,141 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { api } from "@/lib/api";
 import type { AppSettings } from "@/lib/types";
 
+function salespeopleFromDraft(draft: AppSettings) {
+  return draft.salespeople?.length > 0
+    ? draft.salespeople
+    : [draft.currentUserName || "Ahmad Ibrahim"];
+}
+
+function activeFromDraft(draft: AppSettings, salespeople: string[]) {
+  const active = (draft.activeSalesperson || "").trim();
+  if (salespeople.includes(active)) return active;
+  return salespeople[0] || draft.currentUserName || "Ahmad Ibrahim";
+}
+
 export default function SettingsPage() {
-  const { data: draft, loading, error, reload, setData: setDraft } = useApiData<AppSettings>("/api/settings");
-  async function save() { if (draft) { await api("/api/settings", { method: "PUT", body: JSON.stringify(draft) }); await reload(); } }
+  const {
+    data: draft,
+    loading,
+    error,
+    reload,
+    setData: setDraft,
+  } = useApiData<AppSettings>("/api/settings");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [teamNames, setTeamNames] = useState<string[] | null>(null);
+  const [activeSalesperson, setActiveSalesperson] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [sourceId, setSourceId] = useState<string | null>(null);
+
+  async function save() {
+    if (!draft) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const names =
+        (teamNames && teamNames.length > 0
+          ? teamNames
+          : salespeopleFromDraft(draft)
+        ).map((n) => n.trim()).filter(Boolean);
+      const unique = Array.from(new Set(names));
+      const finalNames =
+        unique.length > 0
+          ? unique
+          : [draft.currentUserName || "Ahmad Ibrahim"];
+      const selected =
+        activeSalesperson && finalNames.includes(activeSalesperson)
+          ? activeSalesperson
+          : finalNames[0];
+
+      const payload = {
+        ...draft,
+        salespeople: finalNames,
+        activeSalesperson: selected,
+      };
+      delete (payload as { id?: string }).id;
+
+      const saved = await api<AppSettings>("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      const savedNames = salespeopleFromDraft(saved);
+      setDraft(saved);
+      setTeamNames(savedNames);
+      setActiveSalesperson(activeFromDraft(saved, savedNames));
+      setSourceId(saved.id);
+      setSaveMsg(`Active: ${saved.activeSalesperson} · Team saved`);
+      window.setTimeout(() => setSaveMsg(null), 3000);
+    } catch (err) {
+      setSaveMsg(err instanceof Error ? err.message : "Could not save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addName() {
+    const name = newName.trim();
+    if (!name) return;
+    const current = teamNames ?? (draft ? salespeopleFromDraft(draft) : []);
+    const exists = current.some((n) => n.toLowerCase() === name.toLowerCase());
+    if (exists) {
+      setNewName("");
+      return;
+    }
+    const next = [...current, name];
+    setTeamNames(next);
+    if (!activeSalesperson) setActiveSalesperson(name);
+    setNewName("");
+  }
+
+  function removeName(name: string) {
+    const current = teamNames ?? (draft ? salespeopleFromDraft(draft) : []);
+    const next = current.filter((n) => n !== name);
+    setTeamNames(next);
+    if (activeSalesperson === name) {
+      setActiveSalesperson(next[0] || "");
+    }
+  }
+
   if (loading || !draft) return <LoadingState label="Loading settings…" />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
+
+  if (sourceId !== draft.id) {
+    setSourceId(draft.id);
+    const names = salespeopleFromDraft(draft);
+    setTeamNames(names);
+    setActiveSalesperson(activeFromDraft(draft, names));
+  }
+
   const roles = draft.roles || [];
   const integrations = draft.integrations || [];
+  const names =
+    teamNames && teamNames.length > 0
+      ? teamNames
+      : salespeopleFromDraft(draft);
+  const selectedActive =
+    activeSalesperson && names.includes(activeSalesperson)
+      ? activeSalesperson
+      : names[0] || "";
+
   return (
     <div>
       <PageHeader
         eyebrow="System"
         title="Settings & RBAC"
         description="Role-based access, bilingual invoices (EN + AR), 3 decimal precision, branch defaults, and integration stubs for Phase 1 go-live."
-        actions={<Button variant="gold" onClick={() => void save()}>Save Settings</Button>}
+        actions={
+          <Button variant="gold" disabled={saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save Settings"}
+          </Button>
+        }
       />
+
+      {saveMsg ? (
+        <div className="mb-4 rounded-lg border border-gold/30 bg-gold/10 px-4 py-2.5 text-sm text-gold-deep">
+          {saveMsg}
+        </div>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel>
@@ -48,9 +170,167 @@ export default function SettingsPage() {
 
         <div className="space-y-5">
           <Panel>
+            <PanelHeader
+              title="Sales Team"
+              subtitle="Add names → they appear in dropdown. Admin changes active person anytime."
+            />
+
+            <div className="flex gap-2">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addName();
+                  }
+                }}
+                placeholder="Add salesperson name…"
+                className="h-10 flex-1 rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+              />
+              <Button type="button" variant="secondary" onClick={addName}>
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            </div>
+
+            {names.length > 0 ? (
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {names.map((name) => (
+                  <li
+                    key={name}
+                    className="flex items-center gap-1.5 rounded-full border border-line bg-mist/50 px-2.5 py-1 text-sm"
+                  >
+                    <span>{name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeName(name)}
+                      className="text-ink-muted hover:text-coral"
+                      title={`Remove ${name}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-xs text-ink-muted">No salespeople yet — add a name.</p>
+            )}
+
+            <label className="mt-4 block">
+              <span className="text-xs font-medium text-ink-muted">
+                Active salesperson
+              </span>
+              <select
+                value={selectedActive}
+                onChange={(e) => setActiveSalesperson(e.target.value)}
+                disabled={names.length === 0}
+                className="mt-1.5 h-10 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 disabled:opacity-50"
+              >
+                {names.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1.5 block text-[11px] text-ink-muted">
+                Jab admin aaye, yahan se change karein · Save Settings · POS pe yahi naam lagega.
+              </span>
+            </label>
+          </Panel>
+
+          <Panel>
             <PanelHeader title="Store Defaults" subtitle={draft.branchName} />
             <dl className="space-y-3 text-sm">
-              {(["branchName", "currency", "uiLanguage", "invoiceLanguages", "qtyPrecision", "inventoryMethod", "workingHours", "fridayHours", "minMarginGuard"] as const).map((field) => <EditableRow key={field} label={field.replace(/([A-Z])/g, " $1")} value={String(draft[field] ?? "")} onChange={(value) => setDraft({ ...draft, [field]: field === "qtyPrecision" ? Number(value) : value })} />)}
+              {(
+                [
+                  "branchName",
+                  "currency",
+                  "uiLanguage",
+                  "invoiceLanguages",
+                  "qtyPrecision",
+                  "inventoryMethod",
+                  "workingHours",
+                  "fridayHours",
+                  "minMarginGuard",
+                ] as const
+              ).map((field) => (
+                <EditableRow
+                  key={field}
+                  label={field.replace(/([A-Z])/g, " $1")}
+                  value={String(draft[field] ?? "")}
+                  onChange={(value) =>
+                    setDraft({
+                      ...draft,
+                      [field]: field === "qtyPrecision" ? Number(value) : value,
+                    })
+                  }
+                />
+              ))}
+            </dl>
+          </Panel>
+
+          <Panel>
+            <PanelHeader
+              title="Receipt & Invoice"
+              subtitle="Printed on thermal 80mm / A4 and attached to emailed receipts."
+            />
+            <dl className="space-y-3 text-sm">
+              {(
+                [
+                  ["storeLegalName", "Legal name"],
+                  ["storeAddress", "Address"],
+                  ["storePhone", "Receipt phone"],
+                  ["storeTaxNumber", "TRN / Tax number"],
+                  ["receiptLogoUrl", "Logo URL"],
+                  ["receiptFooter", "Footer line"],
+                ] as const
+              ).map(([field, label]) => (
+                <EditableRow
+                  key={field}
+                  label={label}
+                  value={String(draft[field] ?? "")}
+                  onChange={(value) => setDraft({ ...draft, [field]: value })}
+                />
+              ))}
+              <EditableRow
+                label="VAT % (price-inclusive)"
+                value={String(draft.vatPercent ?? 0)}
+                onChange={(value) =>
+                  setDraft({ ...draft, vatPercent: Number(value) || 0 })
+                }
+              />
+              <div className="flex items-center justify-between gap-4 border-b border-line/50 pb-2">
+                <dt className="text-ink-muted">Default print format</dt>
+                <dd>
+                  <select
+                    value={draft.receiptFormat ?? "thermal"}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        receiptFormat: e.target.value as "thermal" | "a4",
+                      })
+                    }
+                    className="rounded border border-line bg-mist px-2 py-1 text-sm"
+                  >
+                    <option value="thermal">Thermal 80mm</option>
+                    <option value="a4">A4</option>
+                  </select>
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-ink-muted">Auto-print after checkout</dt>
+                <dd>
+                  <input
+                    type="checkbox"
+                    checked={draft.autoPrintReceipt !== false}
+                    onChange={(e) =>
+                      setDraft({ ...draft, autoPrintReceipt: e.target.checked })
+                    }
+                    className="h-4 w-4 accent-[var(--gold,#b8912f)]"
+                  />
+                </dd>
+              </div>
             </dl>
           </Panel>
 
@@ -76,11 +356,25 @@ export default function SettingsPage() {
   );
 }
 
-function EditableRow({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function EditableRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-line/50 pb-2 last:border-0">
       <dt className="text-ink-muted">{label}</dt>
-      <dd><input value={value} onChange={(e) => onChange(e.target.value)} className="w-40 border-b border-line bg-transparent text-right font-medium text-ink outline-none focus:border-gold" /></dd>
+      <dd>
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-40 border-b border-line bg-transparent text-right font-medium text-ink outline-none focus:border-gold"
+        />
+      </dd>
     </div>
   );
 }
