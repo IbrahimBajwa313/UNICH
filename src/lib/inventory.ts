@@ -50,8 +50,7 @@ export type FifoDeductNeed = {
 /**
  * Batch FIFO deduct for many products in ~3 Atlas round-trips:
  * parallel stock reserves → one layer fetch → one bulkWrite.
- * If FIFO layers lag behind stockSellable, auto-heals with a balancing layer
- * so POS complete is not blocked.
+ * Oldest purchaseDate first. No silent auto-heal — short FIFO layers fail the sale.
  */
 export async function deductFifoMany(
   needs: FifoDeductNeed[],
@@ -62,12 +61,10 @@ export async function deductFifoMany(
   if (filtered.length === 0) return results;
 
   const session = opts.session ?? null;
-  const findOpts = session
-    ? { session, writeConcern: FAST_WC }
-    : { writeConcern: FAST_WC };
+  const findOpts = session ? { session } : { writeConcern: FAST_WC };
   const bulkOpts = session
-    ? { session, ordered: false as const, writeConcern: FAST_WC }
-    : { ordered: false as const, writeConcern: FAST_WC };
+    ? { session, ordered: true as const }
+    : { ordered: true as const, writeConcern: FAST_WC };
 
   // Coalesce duplicate productIds
   const coalesced = new Map<string, FifoDeductNeed>();
@@ -88,9 +85,10 @@ export async function deductFifoMany(
     productId: string;
     qty: number;
     name: string;
-    costFifo: number;
   };
   const reserved: Reserved[] = [];
+  const planned = new Map<string, DeductFifoResult>();
+  let layersWritten = false;
 
   try {
     const reserveOne = async (need: FifoDeductNeed): Promise<Reserved> => {
@@ -116,10 +114,10 @@ export async function deductFifoMany(
         productId: need.productId,
         qty: need.qty,
         name: doc.name,
-        costFifo: Number(doc.costFifo) || 0,
       };
     };
 
+    // Sequential under a session (txn); parallel otherwise for latency
     if (session) {
       for (const need of list) reserved.push(await reserveOne(need));
     } else {
@@ -145,33 +143,17 @@ export async function deductFifoMany(
       else layersByProduct.set(key, [layer]);
     }
 
-    type BulkOp =
-      | {
-          updateOne: {
-            filter: {
-              _id: mongoose.Types.ObjectId;
-              qtyRemaining: { $gte: number };
-            };
-            update: { $inc: { qtyRemaining: number } };
-          };
-        }
-      | {
-          insertOne: {
-            document: {
-              _id: mongoose.Types.ObjectId;
-              productId: mongoose.Types.ObjectId;
-              supplierId: mongoose.Types.ObjectId;
-              supplierName: string;
-              purchaseDate: Date;
-              qtyRemaining: number;
-              unitCost: number;
-              currency: string;
-            };
-          };
+    type BulkOp = {
+      updateOne: {
+        filter: {
+          _id: mongoose.Types.ObjectId;
+          qtyRemaining: { $gte: number };
         };
+        update: { $inc: { qtyRemaining: number } };
+      };
+    };
 
     const ops: BulkOp[] = [];
-    const planned = new Map<string, DeductFifoResult>();
 
     for (const item of reserved) {
       let remaining = item.qty;
@@ -199,40 +181,28 @@ export async function deductFifoMany(
         costTotal += take * layer.unitCost;
       }
 
-      // stockSellable allowed the sale but FIFO rows are missing/out of sync — heal
       if (remaining > 0) {
-        const healId = new mongoose.Types.ObjectId();
-        const unitCost = item.costFifo;
-        const purchaseDate = new Date();
-        ops.push({
-          insertOne: {
-            document: {
-              _id: healId,
-              productId: new mongoose.Types.ObjectId(item.productId),
-              supplierId: healId,
-              supplierName: "Auto-balance",
-              purchaseDate,
-              qtyRemaining: 0,
-              unitCost,
-              currency: "AED",
-            },
-          },
-        });
-        batches.push({
-          layerId: String(healId),
-          qty: remaining,
-          unitCost,
-          purchaseDate,
-        });
-        costTotal += remaining * unitCost;
-        remaining = 0;
+        throw new SaleError(
+          "INSUFFICIENT_STOCK",
+          `Insufficient stock for ${item.name} (FIFO need ${item.qty}, short ${remaining})`,
+        );
       }
 
       planned.set(item.productId, { costTotal, batches });
     }
 
     if (ops.length > 0) {
-      await FifoLayer.bulkWrite(ops, bulkOpts);
+      const bulk = await FifoLayer.bulkWrite(ops, bulkOpts);
+      layersWritten = true;
+      const modified =
+        (bulk.modifiedCount ?? 0) + (bulk.upsertedCount ?? 0);
+      // Concurrent consume can fail qtyRemaining $gte — treat as stock race
+      if (modified < ops.length) {
+        throw new SaleError(
+          "INSUFFICIENT_STOCK",
+          "Insufficient stock (FIFO race — retry checkout)",
+        );
+      }
     }
 
     for (const [id, result] of planned) results.set(id, result);
@@ -244,6 +214,7 @@ export async function deductFifoMany(
       );
     }
   } catch (err) {
+    // Outside a Mongo transaction, reverse any sellable reserves / layer takes
     if (!session && reserved.length > 0) {
       await Promise.all(
         reserved.map((r) =>
@@ -254,8 +225,9 @@ export async function deductFifoMany(
           ),
         ),
       );
-      if (results.size > 0) {
-        const layerOps = [...results.values()].flatMap((result) =>
+      const toRestore = layersWritten ? planned : results;
+      if (toRestore.size > 0) {
+        const layerOps = [...toRestore.values()].flatMap((result) =>
           result.batches.map((b) => ({
             updateOne: {
               filter: { _id: b.layerId },

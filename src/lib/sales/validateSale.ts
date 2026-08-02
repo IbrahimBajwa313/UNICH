@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { resolveDeductMlFromUnitLabel } from "@/lib/format";
 import { Formula, Product } from "@/lib/models";
 import {
   OIL_BASE_PRODUCT_ID,
@@ -367,16 +368,20 @@ export async function validateSaleLines(
       if (product.unit !== "ml") {
         throw new SaleError("INVALID_LINE", "Oil line product must use ml unit");
       }
-      const deductMl = Number(raw.deductMl);
-      if (!Number.isFinite(deductMl) || deductMl <= 0) {
-        throw new SaleError("INVALID_LINE", "Oil quantity (ml) is required");
+      const deductMl = resolveDeductMlFromUnitLabel(raw.unitLabel);
+      if (deductMl == null) {
+        throw new SaleError(
+          "INVALID_LINE",
+          "Oil quantity (ml) is required — use 1 Tola / ½ Tola / ¼ Tola or N ml",
+        );
       }
       const unitPrice = Number((product.sellPrice * deductMl).toFixed(3));
+      const unitLabel = raw.unitLabel?.trim() || `${deductMl} ml`;
       lines.push({
         productId: raw.productId,
         name: product.name,
         qty,
-        unitLabel: raw.unitLabel || `${deductMl} ml`,
+        unitLabel,
         unitPrice,
         lineType: "oil",
         deductMl,
@@ -401,19 +406,23 @@ export async function validateSaleLines(
       if (product.unit !== "ml") {
         throw new SaleError("INVALID_LINE", "Refill oil product must use ml unit");
       }
-      const deductMl = Number(raw.deductMl);
-      if (!Number.isFinite(deductMl) || deductMl <= 0) {
-        throw new SaleError("INVALID_LINE", "Refill quantity (ml) is required");
+      const deductMl = resolveDeductMlFromUnitLabel(raw.unitLabel);
+      if (deductMl == null) {
+        throw new SaleError(
+          "INVALID_LINE",
+          "Refill quantity (ml) is required — use a label like 100ml refill",
+        );
       }
       // Backend-owned refill service rate (AED per ml) — do not trust client unitPrice
       const REFILL_AED_PER_ML = 1.2;
       const unitPrice = Number((REFILL_AED_PER_ML * deductMl).toFixed(3));
+      const unitLabel = raw.unitLabel?.trim() || `${deductMl}ml refill`;
 
       lines.push({
         productId: raw.productId,
         name: raw.name || `${product.name} refill`,
         qty,
-        unitLabel: raw.unitLabel || `${deductMl}ml refill`,
+        unitLabel,
         unitPrice,
         lineType: "refill",
         deductMl,
@@ -487,17 +496,14 @@ export async function validateSaleLines(
       let unitPrice = 0;
       let name = raw.name || "Remix";
       let productId = raw.productId;
-      if (raw.productId && mongoose.isValidObjectId(raw.productId)) {
-        const product = requireProduct(productsById, raw.productId);
-        const resolved = resolvePriceFromProduct(product, "remix");
-        unitPrice = resolved.unitPrice;
-        name = resolved.name;
-        productId = raw.productId;
-      } else if (Number.isFinite(Number(raw.unitPrice)) && Number(raw.unitPrice) > 0) {
-        unitPrice = Number(raw.unitPrice);
-      } else {
-        throw new SaleError("INVALID_LINE", "Remix product/price required");
+      if (!raw.productId || !mongoose.isValidObjectId(raw.productId)) {
+        throw new SaleError("INVALID_LINE", "Remix product required");
       }
+      const product = requireProduct(productsById, raw.productId);
+      const resolved = resolvePriceFromProduct(product, "remix");
+      unitPrice = resolved.unitPrice;
+      name = resolved.name;
+      productId = raw.productId;
 
       lines.push({
         productId,
@@ -523,7 +529,8 @@ export async function validateSaleLines(
 
 /**
  * Verify every planned deduction has enough sellable + FIFO stock (read-only).
- * Batched — prefer skipping this when deductFifo will enforce atomically.
+ * Not used on the hot POS path — deductFifo enforces atomically (saves ~1 RTT).
+ * Available for admin tools / preflight checks.
  */
 export async function assertStockAvailable(deductions: DeductionNeed[]) {
   const totals = new Map<string, { qty: number; name: string }>();
@@ -588,54 +595,13 @@ export async function assertStockAvailable(deductions: DeductionNeed[]) {
 const FAST_LINE_TYPES = new Set(["ready", "packaging", "wholesale"]);
 
 /**
- * Zero-DB validation for standard retail lines (ready / packaging / wholesale).
- * Prices/names come from the live POS cart (already loaded from inventory).
- * Returns null when any line needs full server validation (remix/oil/refill).
+ * @deprecated Always use validateSaleLines — client prices must not be trusted.
+ * Kept only so existing imports compile; always returns null.
  */
 export function tryFastValidateSaleLines(
-  rawLines: IncomingSaleLine[],
+  _rawLines: IncomingSaleLine[],
 ): SaleValidationResult | null {
-  if (!Array.isArray(rawLines) || rawLines.length === 0) return null;
-
-  for (const raw of rawLines) {
-    if (!FAST_LINE_TYPES.has(raw.lineType)) return null;
-    if (!raw.productId || !mongoose.isValidObjectId(raw.productId)) return null;
-    const qty = Number(raw.qty);
-    if (!Number.isFinite(qty) || qty <= 0) return null;
-    const unitPrice = Number(raw.unitPrice);
-    if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
-  }
-
-  const lines: ValidatedSaleLine[] = [];
-  const deductions: DeductionNeed[] = [];
-  let subtotal = 0;
-
-  for (let i = 0; i < rawLines.length; i++) {
-    const raw = rawLines[i];
-    const qty = Number(raw.qty);
-    const unitPrice = Number(raw.unitPrice);
-    const name = (raw.name || "").trim() || "Item";
-    const lineType = raw.lineType as ValidatedSaleLine["lineType"];
-
-    lines.push({
-      productId: raw.productId,
-      name,
-      qty,
-      unitLabel: raw.unitLabel || "pcs",
-      unitPrice,
-      lineType,
-      bomNote: raw.bomNote,
-    });
-    deductions.push({
-      productId: raw.productId!,
-      productName: name,
-      qty,
-      reason: lineType,
-      lineIndex: i,
-    });
-    subtotal += qty * unitPrice;
-  }
-
-  return { lines, deductions, subtotal };
+  void FAST_LINE_TYPES;
+  return null;
 }
 

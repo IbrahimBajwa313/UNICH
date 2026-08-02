@@ -150,6 +150,17 @@ export interface Formula {
   updatedAt: string;
 }
 
+export interface PurchaseOrderLine {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  qtyOrdered: number;
+  qtyReceived: number;
+  qtyFifoApplied: number;
+  unitCost: number;
+}
+
 export interface PurchaseOrder {
   id: string;
   supplierId: string;
@@ -159,6 +170,8 @@ export interface PurchaseOrder {
   currency: string;
   total: number;
   itemCount: number;
+  lines: PurchaseOrderLine[];
+  notes?: string;
 }
 
 export interface Quotation {

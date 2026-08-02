@@ -741,11 +741,41 @@ async function seed() {
     },
   ]);
 
+  // Historical header-only POs (no lines → no FIFO on re-save).
+  // Ordered PO includes lines so "Receive" creates FIFO layers in the UI.
   await PurchaseOrder.insertMany([
-    { supplierId: s1._id, supplierName: s1.name, date: new Date("2026-07-18"), status: "received", currency: "AED", total: 6200, itemCount: 4 },
-    { supplierId: s3._id, supplierName: s3.name, date: new Date("2026-07-10"), status: "received", currency: "AED", total: 14850, itemCount: 12 },
-    { supplierId: s4._id, supplierName: s4.name, date: new Date("2026-07-15"), status: "partial", currency: "AED", total: 3100, itemCount: 6 },
-    { supplierId: s2._id, supplierName: s2.name, date: new Date("2026-07-25"), status: "ordered", currency: "USD", total: 2800, itemCount: 2 },
+    { supplierId: s1._id, supplierName: s1.name, date: new Date("2026-07-18"), status: "received", currency: "AED", total: 6200, itemCount: 4, lines: [] },
+    { supplierId: s3._id, supplierName: s3.name, date: new Date("2026-07-10"), status: "received", currency: "AED", total: 14850, itemCount: 12, lines: [] },
+    { supplierId: s4._id, supplierName: s4.name, date: new Date("2026-07-15"), status: "partial", currency: "AED", total: 3100, itemCount: 6, lines: [] },
+    {
+      supplierId: s2._id,
+      supplierName: s2.name,
+      date: new Date("2026-07-25"),
+      status: "ordered",
+      currency: "USD",
+      total: 2800,
+      itemCount: 2,
+      lines: [
+        {
+          productId: bySku["ETH-96"]._id,
+          productName: bySku["ETH-96"].name,
+          sku: "ETH-96",
+          qtyOrdered: 20000,
+          qtyReceived: 0,
+          qtyFifoApplied: 0,
+          unitCost: 0.04,
+        },
+        {
+          productId: bySku["BOT-100"]._id,
+          productName: bySku["BOT-100"].name,
+          sku: "BOT-100",
+          qtyOrdered: 500,
+          qtyReceived: 0,
+          qtyFifoApplied: 0,
+          unitCost: 2.0,
+        },
+      ],
+    },
   ]);
 
   await Quotation.insertMany([
@@ -905,7 +935,7 @@ async function seed() {
     receiptFooter: "Thank you for shopping with UNICH · Exchange within 7 days with receipt.",
     vatPercent: 0,
     receiptFormat: "thermal",
-    autoPrintReceipt: true,
+    autoPrintReceipt: false,
     currentUserName: "Ahmad Ibrahim",
     currentUserRole: "admin",
     currentUserRoleLabel: "Admin",

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { AppSettings } from "@/lib/models";
 import { smsConfigured } from "@/lib/notifications/sms";
+import { invalidateReceiptSettingsCache } from "@/lib/receipt/server";
 import { toJSON } from "@/lib/serialize";
 
 function normalizeSalespeople(value: unknown, fallbackName?: string) {
@@ -102,6 +103,7 @@ export async function PUT(req: Request) {
       },
       { returnDocument: "after", upsert: true, runValidators: true },
     );
+    invalidateReceiptSettingsCache();
     return NextResponse.json(withSalesTeamDefaults(toJSON(settings)!));
   } catch (error) {
     return NextResponse.json(

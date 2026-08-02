@@ -8,14 +8,29 @@ export type ReceiptSettings = ReceiptSettingsInput & {
   autoPrintReceipt: boolean;
 };
 
+/** Short TTL — settings rarely change mid-shift; avoids an extra Atlas round-trip per send. */
+let settingsCache: { at: number; value: ReceiptSettings } | null = null;
+const SETTINGS_CACHE_MS = 60_000;
+
+export function invalidateReceiptSettingsCache() {
+  settingsCache = null;
+}
+
 export async function loadReceiptSettings(): Promise<ReceiptSettings> {
+  const now = Date.now();
+  if (settingsCache && now - settingsCache.at < SETTINGS_CACHE_MS) {
+    return settingsCache.value;
+  }
+
   await connectDB();
-  const settings = await AppSettings.findOne({ key: "default" }).lean<
-    Record<string, unknown>
-  >();
+  const settings = await AppSettings.findOne({ key: "default" })
+    .select(
+      "branchName currency invoiceLanguages storeLegalName storeAddress storePhone storeTaxNumber receiptLogoUrl receiptFooter vatPercent receiptFormat autoPrintReceipt",
+    )
+    .lean<Record<string, unknown>>();
   const raw = settings ?? {};
   const format = raw.receiptFormat === "a4" ? "a4" : "thermal";
-  return {
+  const value: ReceiptSettings = {
     branchName: str(raw.branchName),
     currency: str(raw.currency) || "AED",
     invoiceLanguages: str(raw.invoiceLanguages),
@@ -27,8 +42,10 @@ export async function loadReceiptSettings(): Promise<ReceiptSettings> {
     receiptFooter: str(raw.receiptFooter),
     vatPercent: Number(raw.vatPercent ?? 0),
     receiptFormat: format,
-    autoPrintReceipt: raw.autoPrintReceipt !== false,
+    autoPrintReceipt: raw.autoPrintReceipt === true,
   };
+  settingsCache = { at: now, value };
+  return value;
 }
 
 export function parseFormat(value: string | null | undefined): ReceiptFormat {
@@ -40,7 +57,11 @@ export async function receiptDocForSale(
   options?: { reprint?: boolean; settings?: ReceiptSettings },
 ): Promise<ReceiptDoc | null> {
   await connectDB();
-  const sale = await Sale.findById(saleId).lean<Record<string, unknown>>();
+  const sale = await Sale.findById(saleId)
+    .select(
+      "createdAt status customerName customerPhone salesperson payment lines total",
+    )
+    .lean<Record<string, unknown>>();
   if (!sale) return null;
 
   const settings = options?.settings ?? (await loadReceiptSettings());

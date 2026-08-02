@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -30,16 +30,16 @@ export default function SettingsPage() {
     reload,
     setData: setDraft,
   } = useApiData<AppSettings>("/api/settings");
-  const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [teamNames, setTeamNames] = useState<string[] | null>(null);
   const [activeSalesperson, setActiveSalesperson] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [sourceId, setSourceId] = useState<string | null>(null);
+  const savingRef = useRef(false);
 
   async function save() {
-    if (!draft) return;
-    setSaving(true);
+    if (!draft || savingRef.current) return;
+    savingRef.current = true;
     setSaveMsg(null);
     try {
       const names =
@@ -73,12 +73,12 @@ export default function SettingsPage() {
       setTeamNames(savedNames);
       setActiveSalesperson(activeFromDraft(saved, savedNames));
       setSourceId(saved.id);
-      setSaveMsg(`Active: ${saved.activeSalesperson} · Team saved`);
+      setSaveMsg(`Saved · Active: ${saved.activeSalesperson}`);
       window.setTimeout(() => setSaveMsg(null), 3000);
     } catch (err) {
       setSaveMsg(err instanceof Error ? err.message : "Could not save settings");
     } finally {
-      setSaving(false);
+      savingRef.current = false;
     }
   }
 
@@ -134,8 +134,8 @@ export default function SettingsPage() {
         title="Settings & RBAC"
         description="Role-based access, bilingual invoices (EN + AR), 3 decimal precision, branch defaults, and integration stubs for Phase 1 go-live."
         actions={
-          <Button variant="gold" disabled={saving} onClick={() => void save()}>
-            {saving ? "Saving…" : "Save Settings"}
+          <Button variant="gold" onClick={() => void save()}>
+            Save Settings
           </Button>
         }
       />
@@ -319,11 +319,16 @@ export default function SettingsPage() {
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-4">
-                <dt className="text-ink-muted">Auto-print after checkout</dt>
+                <dt className="text-ink-muted">
+                  POS “Print after complete” preference
+                  <span className="mt-0.5 block text-[11px] font-normal text-ink-muted/80">
+                    Synced when you tick the box on POS. Print never runs unless that POS box is checked at checkout.
+                  </span>
+                </dt>
                 <dd>
                   <input
                     type="checkbox"
-                    checked={draft.autoPrintReceipt !== false}
+                    checked={draft.autoPrintReceipt === true}
                     onChange={(e) =>
                       setDraft({ ...draft, autoPrintReceipt: e.target.checked })
                     }

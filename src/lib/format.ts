@@ -34,6 +34,40 @@ export function tolaToMl(unit: "tola" | "half_tola" | "quarter_tola"): number {
   return QUARTER_TOLA_ML;
 }
 
+/**
+ * Backend-owned oil/refill ml from unitLabel — never trust client deductMl.
+ * Supports: 1 Tola / ½ Tola / ¼ Tola, and explicit "N ml" labels (e.g. refill).
+ */
+export function resolveDeductMlFromUnitLabel(unitLabel?: string): number | null {
+  if (!unitLabel?.trim()) return null;
+  const t = unitLabel.trim().toLowerCase().replace(/\s+/g, " ");
+
+  if (t === "1 tola" || t === "tola" || t === "full tola" || t === "1tola") {
+    return TOLA_ML;
+  }
+  if (
+    t.includes("½") ||
+    t.includes("1/2") ||
+    /\bhalf(?:\s|-)?tola\b/.test(t)
+  ) {
+    return HALF_TOLA_ML;
+  }
+  if (
+    t.includes("¼") ||
+    t.includes("1/4") ||
+    /\bquarter(?:\s|-)?tola\b/.test(t)
+  ) {
+    return QUARTER_TOLA_ML;
+  }
+
+  const mlMatch = t.match(/(\d+(?:\.\d+)?)\s*ml\b/);
+  if (mlMatch) {
+    const ml = Number(mlMatch[1]);
+    if (Number.isFinite(ml) && ml > 0) return ml;
+  }
+  return null;
+}
+
 export function marginPct(sell: number, cost: number): number {
   if (sell <= 0) return 0;
   return ((sell - cost) / sell) * 100;

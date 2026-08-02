@@ -100,6 +100,20 @@ const FormulaSchema = new Schema(
   { timestamps: true },
 );
 
+const PurchaseOrderLineSchema = new Schema(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    productName: { type: String, required: true },
+    sku: { type: String, default: "" },
+    qtyOrdered: { type: Number, required: true, min: 0 },
+    qtyReceived: { type: Number, required: true, default: 0, min: 0 },
+    /** Qty already pushed into FifoLayer — prevents double-apply on re-save. */
+    qtyFifoApplied: { type: Number, required: true, default: 0, min: 0 },
+    unitCost: { type: Number, required: true, min: 0 },
+  },
+  { _id: true },
+);
+
 const PurchaseOrderSchema = new Schema(
   {
     supplierId: { type: Schema.Types.ObjectId, ref: "Supplier", required: true },
@@ -113,6 +127,7 @@ const PurchaseOrderSchema = new Schema(
     currency: { type: String, required: true, default: "AED" },
     total: { type: Number, required: true, default: 0 },
     itemCount: { type: Number, required: true, default: 0 },
+    lines: { type: [PurchaseOrderLineSchema], default: [] },
     notes: String,
   },
   { timestamps: true },
@@ -289,7 +304,7 @@ const AppSettingsSchema = new Schema(
       enum: ["thermal", "a4"],
       default: "thermal",
     },
-    autoPrintReceipt: { type: Boolean, default: true },
+    autoPrintReceipt: { type: Boolean, default: false },
     currentUserName: { type: String, default: "Ahmad Ibrahim" },
     currentUserRole: { type: String, default: "admin" },
     currentUserRoleLabel: { type: String, default: "Admin" },

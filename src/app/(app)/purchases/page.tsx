@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
@@ -9,7 +9,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Stat } from "@/components/ui/Stat";
 import { api } from "@/lib/api";
 import { formatMoney, formatDate } from "@/lib/format";
-import type { PurchaseOrder, Supplier } from "@/lib/types";
+import type { Product, PurchaseOrder, Supplier } from "@/lib/types";
 
 const statusTone = {
   draft: "neutral",
@@ -18,28 +18,178 @@ const statusTone = {
   partial: "warning",
 } as const;
 
+type DraftLine = {
+  productId: string;
+  productName: string;
+  sku: string;
+  qtyOrdered: string;
+  unitCost: string;
+};
+
 export default function PurchasesPage() {
   const { data: purchases, loading, error, reload } = useApiData<PurchaseOrder[]>("/api/purchases");
-  const { data: suppliers, loading: suppliersLoading, error: suppliersError, reload: reloadSuppliers } = useApiData<Supplier[]>("/api/suppliers");
-  const [purchaseDraft, setPurchaseDraft] = useState<Record<string, string> | null>(null);
+  const { data: suppliers, loading: suppliersLoading, error: suppliersError, reload: reloadSuppliers } =
+    useApiData<Supplier[]>("/api/suppliers");
+  const { data: products } = useApiData<Product[]>("/api/products");
+  const [purchaseDraft, setPurchaseDraft] = useState<{
+    supplierId: string;
+    currency: string;
+    status: string;
+    lines: DraftLine[];
+  } | null>(null);
   const [supplierDraft, setSupplierDraft] = useState<Record<string, string> | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const purchaseFormRef = useRef<HTMLDivElement>(null);
+  const supplierFormRef = useRef<HTMLDivElement>(null);
+  const purchaseOpen = purchaseDraft !== null;
+  const supplierOpen = supplierDraft !== null;
+
+  useEffect(() => {
+    if (!purchaseOpen) return;
+    const id = requestAnimationFrame(() => {
+      purchaseFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [purchaseOpen]);
+
+  useEffect(() => {
+    if (!supplierOpen) return;
+    const id = requestAnimationFrame(() => {
+      supplierFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [supplierOpen]);
+
   const purchaseList = purchases ?? [];
   const supplierList = suppliers ?? [];
+  const productList = products ?? [];
   const outstanding = supplierList.reduce((s, x) => s + x.outstanding, 0);
+
+  const draftTotal = useMemo(() => {
+    if (!purchaseDraft) return 0;
+    return purchaseDraft.lines.reduce(
+      (s, l) => s + Number(l.qtyOrdered || 0) * Number(l.unitCost || 0),
+      0,
+    );
+  }, [purchaseDraft]);
+
   async function savePurchase() {
     if (!purchaseDraft?.supplierId) return;
     const supplier = supplierList.find((s) => s.id === purchaseDraft.supplierId);
     if (!supplier) return;
-    await api("/api/purchases", { method: "POST", body: JSON.stringify({ ...purchaseDraft, supplierName: supplier.name, currency: purchaseDraft.currency || supplier.currency, total: Number(purchaseDraft.total || 0), itemCount: Number(purchaseDraft.itemCount || 0) }) });
-    setPurchaseDraft(null); await reload();
+    const lines = purchaseDraft.lines
+      .filter((l) => l.productId && Number(l.qtyOrdered) > 0)
+      .map((l) => ({
+        productId: l.productId,
+        productName: l.productName,
+        sku: l.sku,
+        qtyOrdered: Number(l.qtyOrdered),
+        unitCost: Number(l.unitCost || 0),
+        qtyReceived:
+          purchaseDraft.status === "received" ? Number(l.qtyOrdered) : 0,
+      }));
+    if (!lines.length) {
+      setFormError("Add at least one product line");
+      return;
+    }
+    setFormError(null);
+    try {
+      await api("/api/purchases", {
+        method: "POST",
+        body: JSON.stringify({
+          supplierId: purchaseDraft.supplierId,
+          supplierName: supplier.name,
+          currency: purchaseDraft.currency || supplier.currency,
+          status: purchaseDraft.status || "draft",
+          lines,
+        }),
+      });
+      setPurchaseDraft(null);
+      await reload();
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Failed to save purchase");
+    }
   }
+
+  async function receiveAll(po: PurchaseOrder) {
+    if (!po.lines?.length) return;
+    setBusyId(po.id);
+    try {
+      await api(`/api/purchases/${po.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ receiveAll: true }),
+      });
+      await reload();
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Failed to receive purchase");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function saveSupplier() {
     if (!supplierDraft?.name || !supplierDraft.phone) return;
-    await api("/api/suppliers", { method: "POST", body: JSON.stringify({ ...supplierDraft, creditLimit: Number(supplierDraft.creditLimit || 0), outstanding: 0, avgLeadDays: Number(supplierDraft.avgLeadDays || 0) }) });
-    setSupplierDraft(null); await reloadSuppliers();
+    await api("/api/suppliers", {
+      method: "POST",
+      body: JSON.stringify({
+        ...supplierDraft,
+        creditLimit: Number(supplierDraft.creditLimit || 0),
+        outstanding: 0,
+        avgLeadDays: Number(supplierDraft.avgLeadDays || 0),
+      }),
+    });
+    setSupplierDraft(null);
+    await reloadSuppliers();
   }
+
+  function addLine() {
+    if (!purchaseDraft) return;
+    setPurchaseDraft({
+      ...purchaseDraft,
+      lines: [
+        ...purchaseDraft.lines,
+        { productId: "", productName: "", sku: "", qtyOrdered: "1", unitCost: "" },
+      ],
+    });
+  }
+
+  function updateLine(idx: number, patch: Partial<DraftLine>) {
+    if (!purchaseDraft) return;
+    const lines = purchaseDraft.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+    setPurchaseDraft({ ...purchaseDraft, lines });
+  }
+
+  function pickProduct(idx: number, productId: string) {
+    const p = productList.find((x) => x.id === productId);
+    updateLine(idx, {
+      productId,
+      productName: p?.name || "",
+      sku: p?.sku || "",
+      unitCost: p ? String(p.costFifo || 0) : "",
+    });
+  }
+
+  function removeLine(idx: number) {
+    if (!purchaseDraft) return;
+    setPurchaseDraft({
+      ...purchaseDraft,
+      lines: purchaseDraft.lines.filter((_, i) => i !== idx),
+    });
+  }
+
   if (loading || suppliersLoading) return <LoadingState label="Loading purchasing data…" />;
-  if (error || suppliersError) return <ErrorState message={error || suppliersError || "Failed to load purchasing data"} onRetry={() => { void reload(); void reloadSuppliers(); }} />;
+  if (error || suppliersError) {
+    return (
+      <ErrorState
+        message={error || suppliersError || "Failed to load purchasing data"}
+        onRetry={() => {
+          void reload();
+          void reloadSuppliers();
+        }}
+      />
+    );
+  }
 
   return (
     <div>
@@ -47,7 +197,28 @@ export default function PurchasesPage() {
         eyebrow="Supply Chain"
         title="Purchasing & Suppliers"
         description="Supplier-based purchasing with multi-currency support, credit tracking, and FIFO layer creation on goods receipt. No auto PO — suppliers change often."
-        actions={<div className="flex gap-2"><Button variant="secondary" onClick={() => setSupplierDraft({ currency: "AED" })}>Add Supplier</Button><Button variant="gold" onClick={() => setPurchaseDraft({ currency: "AED", status: "draft" })}>New Purchase</Button></div>}
+        actions={
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setSupplierDraft({ currency: "AED" })}>
+              Add Supplier
+            </Button>
+            <Button
+              variant="gold"
+              onClick={() =>
+                setPurchaseDraft({
+                  supplierId: "",
+                  currency: "AED",
+                  status: "ordered",
+                  lines: [
+                    { productId: "", productName: "", sku: "", qtyOrdered: "1", unitCost: "" },
+                  ],
+                })
+              }
+            >
+              New Purchase
+            </Button>
+          </div>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -56,6 +227,12 @@ export default function PurchasesPage() {
         <Stat label="POs This Month" value={String(purchaseList.length)} />
         <Stat label="Currencies" value="AED · USD" hint="Multi-currency ready" />
       </div>
+
+      {formError ? (
+        <p className="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {formError}
+        </p>
+      ) : null}
 
       <div className="mt-6 grid gap-5 xl:grid-cols-2">
         <Panel padding={false}>
@@ -68,37 +245,57 @@ export default function PurchasesPage() {
                 <th className="px-5 py-2.5 font-medium">Date</th>
                 <th className="px-3 py-2.5 font-medium">Supplier</th>
                 <th className="px-3 py-2.5 font-medium">Status</th>
-                <th className="px-5 py-2.5 text-right font-medium">Total</th>
+                <th className="px-3 py-2.5 text-right font-medium">Total</th>
+                <th className="px-5 py-2.5 text-right font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
-              {purchaseList.map((po) => (
-                <tr key={po.id} className="border-t border-line/60">
-                  <td className="px-5 py-3 text-ink-muted">{formatDate(po.date)}</td>
-                  <td className="px-3 py-3">
-                    <p className="font-medium">{po.supplierName}</p>
-                    <p className="text-[11px] text-ink-muted">
-                      {po.itemCount} lines · {po.currency}
-                    </p>
-                  </td>
-                  <td className="px-3 py-3">
-                    <Badge tone={statusTone[po.status]}>{po.status}</Badge>
-                  </td>
-                  <td className="px-5 py-3 text-right font-medium">
-                    {formatMoney(po.total, po.currency)}
-                  </td>
-                </tr>
-              ))}
+              {purchaseList.map((po) => {
+                const canReceive =
+                  (po.status === "ordered" || po.status === "partial" || po.status === "draft") &&
+                  (po.lines?.length ?? 0) > 0 &&
+                  po.lines.some((l) => l.qtyReceived < l.qtyOrdered);
+                return (
+                  <tr key={po.id} className="border-t border-line/60">
+                    <td className="px-5 py-3 text-ink-muted">{formatDate(po.date)}</td>
+                    <td className="px-3 py-3">
+                      <p className="font-medium">{po.supplierName}</p>
+                      <p className="text-[11px] text-ink-muted">
+                        {po.itemCount} lines · {po.currency}
+                        {po.lines?.length
+                          ? ` · recv ${po.lines.reduce((s, l) => s + l.qtyReceived, 0)}/${po.lines.reduce((s, l) => s + l.qtyOrdered, 0)}`
+                          : ""}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <Badge tone={statusTone[po.status]}>{po.status}</Badge>
+                    </td>
+                    <td className="px-3 py-3 text-right font-medium">
+                      {formatMoney(po.total, po.currency)}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      {canReceive ? (
+                        <Button
+                          variant="secondary"
+                          disabled={busyId === po.id}
+                          onClick={() => void receiveAll(po)}
+                        >
+                          {busyId === po.id ? "Receiving…" : "Receive"}
+                        </Button>
+                      ) : po.status === "received" && (po.lines?.length ?? 0) > 0 ? (
+                        <span className="text-[11px] text-ink-muted">FIFO applied</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </Panel>
 
         <Panel padding={false}>
           <div className="border-b border-line/70 px-5 py-4">
-            <PanelHeader
-              title="Supplier Directory"
-              subtitle="Price history & credit"
-            />
+            <PanelHeader title="Supplier Directory" subtitle="Price history & credit" />
           </div>
           <ul className="divide-y divide-line/60">
             {supplierList.map((s) => (
@@ -122,10 +319,177 @@ export default function PurchasesPage() {
           </ul>
         </Panel>
       </div>
-      {purchaseDraft ? <Panel className="mt-5"><PanelHeader title="New Purchase" subtitle="Create a purchase order" /><div className="grid gap-3 sm:grid-cols-4"><label>Supplier<select value={purchaseDraft.supplierId || ""} onChange={(e) => setPurchaseDraft({ ...purchaseDraft, supplierId: e.target.value })} className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"><option value="">Select supplier</option>{supplierList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><Field label="Total" value={purchaseDraft.total || ""} onChange={(total) => setPurchaseDraft({ ...purchaseDraft, total })} /><Field label="Item count" value={purchaseDraft.itemCount || ""} onChange={(itemCount) => setPurchaseDraft({ ...purchaseDraft, itemCount })} /><label>Status<select value={purchaseDraft.status || "draft"} onChange={(e) => setPurchaseDraft({ ...purchaseDraft, status: e.target.value })} className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"><option>draft</option><option>ordered</option><option>received</option><option>partial</option></select></label></div><div className="mt-3 flex gap-2"><Button onClick={savePurchase}>Save Purchase</Button><Button variant="secondary" onClick={() => setPurchaseDraft(null)}>Cancel</Button></div></Panel> : null}
-      {supplierDraft ? <Panel className="mt-5"><PanelHeader title="New Supplier" subtitle="Add a supplier directory entry" /><div className="grid gap-3 sm:grid-cols-4"><Field label="Name" value={supplierDraft.name || ""} onChange={(name) => setSupplierDraft({ ...supplierDraft, name })} /><Field label="Phone" value={supplierDraft.phone || ""} onChange={(phone) => setSupplierDraft({ ...supplierDraft, phone })} /><Field label="Currency" value={supplierDraft.currency || "AED"} onChange={(currency) => setSupplierDraft({ ...supplierDraft, currency })} /><Field label="Credit limit" value={supplierDraft.creditLimit || ""} onChange={(creditLimit) => setSupplierDraft({ ...supplierDraft, creditLimit })} /></div><div className="mt-3 flex gap-2"><Button onClick={saveSupplier}>Save Supplier</Button><Button variant="secondary" onClick={() => setSupplierDraft(null)}>Cancel</Button></div></Panel> : null}
+
+      {purchaseDraft ? (
+        <div ref={purchaseFormRef}>
+        <Panel className="mt-5">
+          <PanelHeader
+            title="New Purchase"
+            subtitle="Add product lines — set status to Received to create FIFO layers immediately"
+          />
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="text-xs text-ink-muted">
+              Supplier
+              <select
+                value={purchaseDraft.supplierId}
+                onChange={(e) => {
+                  const s = supplierList.find((x) => x.id === e.target.value);
+                  setPurchaseDraft({
+                    ...purchaseDraft,
+                    supplierId: e.target.value,
+                    currency: s?.currency || purchaseDraft.currency,
+                  });
+                }}
+                className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"
+              >
+                <option value="">Select supplier</option>
+                {supplierList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-ink-muted">
+              Status
+              <select
+                value={purchaseDraft.status}
+                onChange={(e) => setPurchaseDraft({ ...purchaseDraft, status: e.target.value })}
+                className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"
+              >
+                <option value="draft">draft</option>
+                <option value="ordered">ordered</option>
+                <option value="received">received (apply FIFO now)</option>
+              </select>
+            </label>
+            <div className="flex items-end">
+              <p className="text-sm text-ink-muted">
+                Total{" "}
+                <span className="font-semibold text-ink">
+                  {formatMoney(draftTotal, purchaseDraft.currency)}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium uppercase tracking-wider text-ink-muted">Lines</p>
+              <Button variant="secondary" onClick={addLine}>
+                Add line
+              </Button>
+            </div>
+            {purchaseDraft.lines.map((line, idx) => (
+              <div
+                key={idx}
+                className="grid gap-2 rounded border border-line/60 bg-mist/40 p-3 sm:grid-cols-[2fr_1fr_1fr_auto]"
+              >
+                <label className="text-xs text-ink-muted">
+                  Product
+                  <select
+                    value={line.productId}
+                    onChange={(e) => pickProduct(idx, e.target.value)}
+                    className="mt-1 h-9 w-full rounded border border-line bg-white px-2"
+                  >
+                    <option value="">Select product</option>
+                    {productList.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.sku} — {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Field
+                  label="Qty"
+                  value={line.qtyOrdered}
+                  onChange={(qtyOrdered) => updateLine(idx, { qtyOrdered })}
+                />
+                <Field
+                  label="Unit cost"
+                  value={line.unitCost}
+                  onChange={(unitCost) => updateLine(idx, { unitCost })}
+                />
+                <div className="flex items-end">
+                  <Button variant="secondary" onClick={() => removeLine(idx)}>
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <Button onClick={() => void savePurchase()}>Save Purchase</Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPurchaseDraft(null);
+                setFormError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </Panel>
+        </div>
+      ) : null}
+
+      {supplierDraft ? (
+        <div ref={supplierFormRef}>
+        <Panel className="mt-5">
+          <PanelHeader title="New Supplier" subtitle="Add a supplier directory entry" />
+          <div className="grid gap-3 sm:grid-cols-4">
+            <Field
+              label="Name"
+              value={supplierDraft.name || ""}
+              onChange={(name) => setSupplierDraft({ ...supplierDraft, name })}
+            />
+            <Field
+              label="Phone"
+              value={supplierDraft.phone || ""}
+              onChange={(phone) => setSupplierDraft({ ...supplierDraft, phone })}
+            />
+            <Field
+              label="Currency"
+              value={supplierDraft.currency || "AED"}
+              onChange={(currency) => setSupplierDraft({ ...supplierDraft, currency })}
+            />
+            <Field
+              label="Credit limit"
+              value={supplierDraft.creditLimit || ""}
+              onChange={(creditLimit) => setSupplierDraft({ ...supplierDraft, creditLimit })}
+            />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Button onClick={() => void saveSupplier()}>Save Supplier</Button>
+            <Button variant="secondary" onClick={() => setSupplierDraft(null)}>
+              Cancel
+            </Button>
+          </div>
+        </Panel>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="text-xs text-ink-muted">{label}<input value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm" /></label>; }
+function Field({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-xs text-ink-muted">
+      {label}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm"
+      />
+    </label>
+  );
+}

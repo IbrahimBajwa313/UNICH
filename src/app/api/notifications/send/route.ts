@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { sendEmail } from "@/lib/notifications/email";
 import { logDelivery } from "@/lib/notifications/log";
-import { phonesMatch } from "@/lib/notifications/phone";
+import { normalizePhone } from "@/lib/notifications/phone";
 import { sendSms } from "@/lib/notifications/sms";
 import {
   buildWhatsAppUrl,
@@ -65,14 +65,41 @@ function resolveChannels(body: Body): Channel[] {
   return ["whatsapp"];
 }
 
-async function findCustomerByPhone(phone: string) {
-  const exact = await Customer.findOne({ phone });
-  if (exact) return exact;
+/** Indexed lookups only — never scan the full customer collection. */
+function phoneLookupVariants(phone: string): string[] {
+  const trimmed = phone.trim();
+  const digits = trimmed.replace(/\D/g, "");
+  const out = new Set<string>();
+  if (trimmed) out.add(trimmed);
+  if (!digits) return [...out];
 
-  const candidates = await Customer.find({}).select("name phone email").lean();
-  const match = candidates.find((c) => phonesMatch(c.phone || "", phone));
-  if (!match) return null;
-  return Customer.findById(match._id);
+  out.add(digits);
+  out.add(`+${digits}`);
+
+  const normalized = normalizePhone(trimmed);
+  if (normalized) {
+    out.add(normalized);
+    out.add(`+${normalized}`);
+    out.add(`0${normalized.slice(-9)}`);
+  }
+
+  if (digits.startsWith("0") && digits.length > 1) {
+    out.add(digits.slice(1));
+  }
+  if (digits.length >= 10) {
+    out.add(digits.slice(-10));
+    out.add(`0${digits.slice(-9)}`);
+  }
+
+  return [...out];
+}
+
+async function findCustomerByPhone(phone: string) {
+  const variants = phoneLookupVariants(phone);
+  if (variants.length === 0) return null;
+  return Customer.findOne({ phone: { $in: variants } })
+    .select("name phone email")
+    .lean<{ _id: unknown; name?: string; phone?: string; email?: string }>();
 }
 
 export async function POST(req: Request) {
@@ -85,15 +112,26 @@ export async function POST(req: Request) {
     let toEmail = body.toEmail?.trim() || "";
     let customerName = body.customerName?.trim() || "";
 
-    if (toPhone) {
+    const needsEmailLookup =
+      channels.includes("email") && !toEmail && Boolean(toPhone);
+    const needsNameLookup = !customerName && Boolean(toPhone);
+    const shouldPersistEmail = Boolean(toEmail && toPhone);
+
+    // Only hit Customer when we actually need data from it.
+    if (needsEmailLookup || needsNameLookup || shouldPersistEmail) {
       await connectDB();
       const customer = await findCustomerByPhone(toPhone);
       if (customer) {
         if (!toEmail && customer.email) toEmail = customer.email;
-        if (!customerName) customerName = customer.name;
-        if (toEmail && !customer.email) {
-          customer.email = toEmail;
-          await customer.save();
+        if (!customerName) customerName = customer.name || "";
+        if (shouldPersistEmail && !customer.email) {
+          // Persist off the critical path — don't block send on a write.
+          void Customer.updateOne(
+            { _id: customer._id },
+            { $set: { email: toEmail } },
+          ).catch(() => {
+            /* non-fatal */
+          });
         }
       }
     }
@@ -101,40 +139,45 @@ export async function POST(req: Request) {
     const content = await buildContent({
       body,
       kind,
+      channels,
       toPhone,
       toEmail,
       customerName,
     });
 
+    const jobs: Promise<void>[] = [];
     const results: Partial<Record<Channel, ChannelResult>> = {};
 
     if (channels.includes("email")) {
-      results.email = await deliverEmail({
-        to: toEmail,
-        subject: body.subject || content.subject,
-        text: content.text,
-        html: content.html,
-      });
-      await logDelivery({
-        channel: "email",
-        kind,
-        status: results.email.ok ? "sent" : "failed",
-        saleId: body.saleId,
-        quotationId: body.quotation?.id,
-        receiptNo: content.receiptNo,
-        to: toEmail,
-        providerId: results.email.id,
-        error: results.email.error,
-        preview: content.text,
-      });
+      jobs.push(
+        (async () => {
+          results.email = await deliverEmail({
+            to: toEmail,
+            subject: body.subject || content.subject,
+            text: content.text,
+            html: content.html,
+          });
+          void logDelivery({
+            channel: "email",
+            kind,
+            status: results.email.ok ? "sent" : "failed",
+            saleId: body.saleId,
+            quotationId: body.quotation?.id,
+            receiptNo: content.receiptNo,
+            to: toEmail,
+            providerId: results.email.id,
+            error: results.email.error,
+            preview: content.text,
+          });
+        })(),
+      );
     }
 
     if (channels.includes("whatsapp")) {
       results.whatsapp = deliverWhatsApp(toPhone, content.text);
-      await logDelivery({
+      void logDelivery({
         channel: "whatsapp",
         kind,
-        // The operator still confirms the send inside WhatsApp, so this is a hand-off.
         status: results.whatsapp.ok ? "handoff" : "failed",
         saleId: body.saleId,
         quotationId: body.quotation?.id,
@@ -146,20 +189,26 @@ export async function POST(req: Request) {
     }
 
     if (channels.includes("sms")) {
-      results.sms = await deliverSms(toPhone, content.sms);
-      await logDelivery({
-        channel: "sms",
-        kind,
-        status: results.sms.ok ? "sent" : "failed",
-        saleId: body.saleId,
-        quotationId: body.quotation?.id,
-        receiptNo: content.receiptNo,
-        to: toPhone,
-        providerId: results.sms.id,
-        error: results.sms.error,
-        preview: content.sms,
-      });
+      jobs.push(
+        (async () => {
+          results.sms = await deliverSms(toPhone, content.sms);
+          void logDelivery({
+            channel: "sms",
+            kind,
+            status: results.sms.ok ? "sent" : "failed",
+            saleId: body.saleId,
+            quotationId: body.quotation?.id,
+            receiptNo: content.receiptNo,
+            to: toPhone,
+            providerId: results.sms.id,
+            error: results.sms.error,
+            preview: content.sms,
+          });
+        })(),
+      );
     }
+
+    if (jobs.length > 0) await Promise.all(jobs);
 
     const failed = channels.filter((channel) => !results[channel]?.ok);
     if (failed.length > 0) {
@@ -199,6 +248,7 @@ export async function POST(req: Request) {
 async function buildContent(input: {
   body: Body;
   kind: DeliveryKind;
+  channels: Channel[];
   toPhone: string;
   toEmail: string;
   customerName: string;
@@ -209,22 +259,36 @@ async function buildContent(input: {
   html?: string;
   receiptNo?: string;
 }> {
-  const { body, kind, toPhone, toEmail, customerName } = input;
+  const { body, kind, channels, toPhone, toEmail, customerName } = input;
   const override = body.message?.trim();
+  const wantsHtml = channels.includes("email") && !override;
 
   if (kind === "receipt") {
     const settings = await loadReceiptSettings();
-    const doc = body.saleId
-      ? await receiptDocForSale(body.saleId, { settings })
-      : buildReceiptDoc({
-          draft: true,
+    // Prefer client-provided lines — avoids a Sale.findById round-trip (~0.5–2s on Atlas).
+    const hasClientLines = Array.isArray(body.lines) && body.lines.length > 0;
+    const doc = hasClientLines
+      ? buildReceiptDoc({
+          saleId: body.saleId,
+          draft: !body.saleId,
           customer: { name: customerName, phone: toPhone, email: toEmail },
           salesperson: body.salesperson,
           payment: body.payment,
           lines: body.lines ?? [],
           total: body.total,
           settings,
-        });
+        })
+      : body.saleId
+        ? await receiptDocForSale(body.saleId, { settings })
+        : buildReceiptDoc({
+            draft: true,
+            customer: { name: customerName, phone: toPhone, email: toEmail },
+            salesperson: body.salesperson,
+            payment: body.payment,
+            lines: body.lines ?? [],
+            total: body.total,
+            settings,
+          });
 
     if (!doc) {
       throw new Error("Sale not found for this receipt");
@@ -234,7 +298,7 @@ async function buildContent(input: {
       subject: `${doc.store.name} Receipt ${doc.receiptNo}`,
       text: override || receiptText(doc),
       sms: receiptSmsText(doc),
-      html: override ? undefined : renderReceiptHtml(doc, "a4"),
+      html: wantsHtml ? renderReceiptHtml(doc, "a4") : undefined,
       receiptNo: doc.receiptNo,
     };
   }

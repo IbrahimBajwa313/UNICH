@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Banknote,
+  CheckCircle2,
+  ChevronDown,
   CreditCard,
   FileClock,
   FileText,
@@ -26,14 +28,34 @@ import { Panel } from "@/components/ui/Panel";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
 import { api } from "@/lib/api";
 import { formatMoney, tolaToMl } from "@/lib/format";
+import { buildWhatsAppUrl } from "@/lib/notifications/whatsapp";
+import { buildReceiptDoc } from "@/lib/receipt/document";
 import {
   fetchReceiptHtml,
   printHtmlDocument,
   printSaleReceipt,
 } from "@/lib/receipt/print";
-import type { ReceiptFormat } from "@/lib/receipt/types";
+import { receiptText } from "@/lib/receipt/text";
+import type { ReceiptFormat, ReceiptLine } from "@/lib/receipt/types";
 import { matchRemixRole } from "@/lib/sales/constants";
-import type { AppSettings, PaymentMethod, Product } from "@/lib/types";
+import type { AppSettings, Customer, PaymentMethod, Product } from "@/lib/types";
+
+type CatalogFilter = "all" | "ready" | "oil" | "custom";
+
+const CATALOG_FILTERS: { id: CatalogFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "ready", label: "Ready" },
+  { id: "oil", label: "Oils" },
+  { id: "custom", label: "Remix" },
+];
+
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
 
 type CartLineType = "ready" | "remix" | "oil" | "refill" | "packaging";
 
@@ -72,6 +94,8 @@ type LastSale = {
   phone: string;
   email: string;
   payment: string;
+  salesperson: string;
+  lines: ReceiptLine[];
 };
 
 type PackagingGroup = "bottle" | "cap" | "atomizer" | "collar" | "pouch" | "other";
@@ -144,28 +168,45 @@ function createIdempotencyKey() {
 }
 
 export default function PosPage() {
-  const { data: products, loading, error, reload } = useApiData<Product[]>("/api/products");
+  const {
+    data: products,
+    loading,
+    error,
+    reload,
+    setData: setProducts,
+  } = useApiData<Product[]>("/api/products");
   const settings = useApiData<AppSettings>("/api/settings");
   const {
     data: heldBills,
     reload: reloadHeld,
     setData: setHeldBills,
   } = useApiData<HeldSale[]>("/api/sales?status=held&limit=50");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const phoneLookupSeq = useRef(0);
   const [query, setQuery] = useState("");
+  const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
+  const [toolStrip, setToolStrip] = useState<"packaging" | "quick">("quick");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [payment, setPayment] = useState<PaymentMethod>("cash");
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [customerMatch, setCustomerMatch] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"ok" | "err">("ok");
   const [checkingOut, setCheckingOut] = useState(false);
   const [holding, setHolding] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [discardingId, setDiscardingId] = useState<string | null>(null);
+  const [switchingSalesperson, setSwitchingSalesperson] = useState(false);
   const [remixOilId, setRemixOilId] = useState("");
   const [lastSale, setLastSale] = useState<LastSale | null>(null);
+  const [saleDoneOpen, setSaleDoneOpen] = useState(false);
+  /** Cashier opt-in only — never print unless this box is checked. */
+  const [printAfterComplete, setPrintAfterComplete] = useState(false);
   const [receiptBusy, setReceiptBusy] = useState<string | null>(null);
+  const [heldMenuOpen, setHeldMenuOpen] = useState(false);
+  const sendInFlight = useRef(new Set<string>());
   const [packagingPick, setPackagingPick] = useState<
     Partial<Record<PackagingGroup, string>>
   >({});
@@ -184,6 +225,7 @@ export default function PosPage() {
   const defaultFormat: ReceiptFormat =
     settings.data?.receiptFormat === "a4" ? "a4" : "thermal";
   const smsAvailable = Boolean(settings.data?.smsConfigured);
+  const vatPercent = Math.max(0, Number(settings.data?.vatPercent ?? 0));
 
   const oilProducts = useMemo(
     () => inventory.filter((p) => p.unit === "ml" && p.category !== "Packaging"),
@@ -212,6 +254,10 @@ export default function PosPage() {
   }, [packagingProducts]);
 
   const hasRefillInCart = cart.some((l) => l.lineType === "refill");
+
+  useEffect(() => {
+    if (hasRefillInCart) setToolStrip("packaging");
+  }, [hasRefillInCart]);
 
   function setPackagingForGroup(group: PackagingGroup, productId: string) {
     setPackagingPick((prev) => {
@@ -252,25 +298,101 @@ export default function PosPage() {
 
   const catalog = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return inventory.filter(
-      (p) =>
-        p.category !== "Packaging" &&
-        (q === "" ||
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q)),
-    );
-  }, [inventory, query]);
+    return inventory.filter((p) => {
+      if (p.category === "Packaging") return false;
+      if (catalogFilter === "oil" && p.unit !== "ml") return false;
+      if (catalogFilter === "custom" && p.category !== "Customized Perfumes") {
+        return false;
+      }
+      if (
+        catalogFilter === "ready" &&
+        (p.unit === "ml" || p.category === "Customized Perfumes")
+      ) {
+        return false;
+      }
+      if (q === "") return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q)
+      );
+    });
+  }, [inventory, query, catalogFilter]);
 
   const quick = inventory.filter((p) => p.isQuickButton);
 
   const subtotal = cart.reduce((s, l) => s + l.qty * l.unitPrice, 0);
+  const vatAmount =
+    vatPercent > 0 ? round2(subtotal - subtotal / (1 + vatPercent / 100)) : 0;
+  const netAmount = round2(subtotal - vatAmount);
   const itemCount = cart.reduce((s, l) => s + l.qty, 0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => searchRef.current?.focus(), 80);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const digits = digitsOnly(phone);
+    if (digits.length < 7) {
+      setCustomerMatch(null);
+      return;
+    }
+    const seq = ++phoneLookupSeq.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        const list = await api<Customer[]>(
+          `/api/customers?q=${encodeURIComponent(phone.trim())}`,
+        );
+        if (seq !== phoneLookupSeq.current) return;
+        const match =
+          list.find((c) => digitsOnly(c.phone) === digits) ||
+          list.find((c) => {
+            const pd = digitsOnly(c.phone);
+            return pd.endsWith(digits) || digits.endsWith(pd);
+          });
+        if (match) {
+          setCustomerMatch(match.name);
+          setCustomerName(match.name);
+          setEmail(match.email?.trim() || "");
+        } else {
+          setCustomerMatch(null);
+        }
+      } catch {
+        if (seq === phoneLookupSeq.current) setCustomerMatch(null);
+      }
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [phone]);
 
   function flash(msg: string, ms = 2200, tone: "ok" | "err" = "ok") {
     setToastTone(tone);
     setToast(msg);
     window.setTimeout(() => setToast(null), ms);
+  }
+
+  async function switchSalesperson(name: string) {
+    if (!settings.data || name === salesperson) return;
+    setSwitchingSalesperson(true);
+    try {
+      const updated = await api<AppSettings>("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          ...settings.data,
+          activeSalesperson: name,
+        }),
+      });
+      settings.setData(updated);
+      flash(`Salesperson · ${name}`);
+    } catch (err) {
+      flash(
+        err instanceof Error ? err.message : "Could not switch salesperson",
+        6000,
+        "err",
+      );
+    } finally {
+      setSwitchingSalesperson(false);
+    }
   }
 
   function addReady(product: Product) {
@@ -338,6 +460,56 @@ export default function PosPage() {
         bomNote: `Deduct ${ml} ml from ${product.name}`,
       },
     ]);
+  }
+
+  function addProductSmart(product: Product) {
+    if (product.stockSellable <= 0) {
+      flash(`${product.name} is out of stock`, 4000, "err");
+      return;
+    }
+    if (product.category === "Customized Perfumes") {
+      addRemix();
+      return;
+    }
+    if (product.unit === "ml") {
+      addOil(product, "tola");
+      return;
+    }
+    addReady(product);
+  }
+
+  /** Instant catalog stock update after sale — avoids waiting on full reload. */
+  function applyLocalStockDeduction(lines: CartLine[]) {
+    const delta = new Map<string, number>();
+    for (const line of lines) {
+      if (line.lineType === "ready" || line.lineType === "packaging") {
+        delta.set(
+          line.product.id,
+          (delta.get(line.product.id) || 0) + line.qty,
+        );
+      } else if (
+        (line.lineType === "oil" || line.lineType === "refill") &&
+        line.deductMl
+      ) {
+        delta.set(
+          line.product.id,
+          (delta.get(line.product.id) || 0) + line.deductMl * line.qty,
+        );
+      }
+      // remix BOM components refresh via silent API reload
+    }
+    if (delta.size === 0) return;
+    setProducts((prev) => {
+      if (!prev) return prev;
+      return prev.map((p) => {
+        const cut = delta.get(p.id);
+        if (!cut) return p;
+        return {
+          ...p,
+          stockSellable: Math.max(0, p.stockSellable - cut),
+        };
+      });
+    });
   }
 
   function addRefill() {
@@ -420,6 +592,7 @@ export default function PosPage() {
       phone: phone.trim(),
       email: email.trim(),
       payment,
+      salesperson,
       subtotal,
     };
     // Clear cart immediately (same feel as Hold) — restore if save fails
@@ -428,6 +601,7 @@ export default function PosPage() {
     setCustomerName("");
     setPhone("");
     setEmail("");
+    setCustomerMatch(null);
     try {
       const sale = await api<{ id: string; total?: number }>("/api/sales", {
         method: "POST",
@@ -435,7 +609,7 @@ export default function PosPage() {
         body: JSON.stringify({
           customerPhone: snapshot.phone,
           customerName: snapshot.customerName || undefined,
-          salesperson,
+          salesperson: snapshot.salesperson,
           payment: snapshot.payment,
           idempotencyKey,
           lines: snapshot.cart.map((line) => ({
@@ -458,14 +632,26 @@ export default function PosPage() {
         phone: snapshot.phone,
         email: snapshot.email,
         payment: snapshot.payment,
+        salesperson: snapshot.salesperson,
+        lines: snapshot.cart.map((line) => ({
+          name: line.product.name,
+          qty: line.qty,
+          unitLabel: line.unitLabel,
+          unitPrice: line.unitPrice,
+        })),
       };
       setLastSale(completed);
+      setSaleDoneOpen(true);
       flash(`Sale completed · ${formatMoney(snapshot.subtotal)} · ${snapshot.payment}`);
-      void reloadHeld();
-      if (settings.data?.autoPrintReceipt !== false) {
+      // Soft stock refresh — silent so POS does not flash "Loading…"
+      applyLocalStockDeduction(snapshot.cart);
+      void reloadHeld({ silent: true });
+      // Print ONLY if cashier checked "Print after complete" (never automatic).
+      if (printAfterComplete) {
         void printSale(completed, defaultFormat, false);
       }
-      window.setTimeout(() => void reload(), 2500);
+      void reload({ silent: true });
+      window.setTimeout(() => searchRef.current?.focus(), 100);
     } catch (err) {
       setCart(snapshot.cart);
       setPackagingPick(snapshot.packagingPick);
@@ -478,6 +664,47 @@ export default function PosPage() {
       setCheckingOut(false);
     }
   }
+
+  const checkoutRef = useRef(checkout);
+  checkoutRef.current = checkout;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const typing =
+        tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+      if (e.key === "F2") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (e.key === "F9") {
+        e.preventDefault();
+        void checkoutRef.current();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (saleDoneOpen) {
+          e.preventDefault();
+          setSaleDoneOpen(false);
+          return;
+        }
+        if (toast) {
+          e.preventDefault();
+          setToast(null);
+        }
+        return;
+      }
+      if (!typing && e.key === "/" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [saleDoneOpen, toast]);
 
   function stubProductFromLine(line: HeldSaleLine): Product {
     const pid = line.productId ? String(line.productId) : `missing-${line.name}`;
@@ -562,6 +789,7 @@ export default function PosPage() {
     setCustomerName("");
     setPhone("");
     setEmail("");
+    setCustomerMatch(null);
     try {
       const held = await api<HeldSale>("/api/sales", {
         method: "POST",
@@ -752,10 +980,30 @@ export default function PosPage() {
     flash("Add items or complete a sale first", 4000, "err");
   }
 
+  function buildPosReceiptDoc(target: LastSale | null) {
+    const lines = target?.lines?.length ? target.lines : receiptLines();
+    return buildReceiptDoc({
+      saleId: target?.id,
+      draft: !target,
+      customer: {
+        name: target ? target.customerName : customerName.trim(),
+        phone: target ? target.phone : phone.trim(),
+        email: target ? target.email : email.trim(),
+      },
+      salesperson: target?.salesperson || salesperson,
+      payment: target ? target.payment : payment,
+      lines,
+      total: target ? target.total : subtotal,
+      settings: settings.data ?? undefined,
+    });
+  }
+
   async function sendReceipt(channels: SendChannel[]) {
     const target = cart.length === 0 ? lastSale : null;
     const toPhone = target ? target.phone : phone.trim();
     const toEmail = target ? target.email : email.trim();
+    const lines = target?.lines?.length ? target.lines : receiptLines();
+    const flightKey = `${target?.id || "draft"}:${channels.join("+")}`;
 
     if (!target && cart.length === 0) {
       flash("Add items or complete a sale first", 4000, "err");
@@ -769,43 +1017,98 @@ export default function PosPage() {
       flash("Add a customer email to send the receipt by email", 6000, "err");
       return;
     }
+    if (sendInFlight.current.has(flightKey)) return;
+    sendInFlight.current.add(flightKey);
 
-    setReceiptBusy(channels.join("+"));
+    const done: string[] = [];
+    let receiptNo = "";
+    let background = false;
+
     try {
-      const res = await api<{
-        receiptNo?: string;
-        whatsapp?: { ok: boolean; url?: string; error?: string };
-        email?: { ok: boolean; to?: string; error?: string };
-        sms?: { ok: boolean; to?: string; error?: string };
-      }>("/api/notifications/send", {
-        method: "POST",
-        body: JSON.stringify({
-          channels,
-          kind: "receipt",
-          saleId: target?.id,
-          toPhone,
-          toEmail: toEmail || undefined,
-          customerName: target ? target.customerName : customerName.trim(),
-          salesperson,
-          payment: target ? target.payment : payment,
-          total: target ? target.total : subtotal,
-          lines: target ? undefined : receiptLines(),
-        }),
-      });
-
-      if (res.whatsapp?.url) {
-        window.open(res.whatsapp.url, "_blank", "noopener,noreferrer");
+      if (channels.includes("whatsapp")) {
+        try {
+          const doc = buildPosReceiptDoc(target);
+          receiptNo = doc.receiptNo;
+          window.open(
+            buildWhatsAppUrl(toPhone, receiptText(doc)),
+            "_blank",
+            "noopener,noreferrer",
+          );
+          done.push("WhatsApp opened");
+          void api("/api/notifications/log", {
+            method: "POST",
+            body: JSON.stringify({
+              channel: "whatsapp",
+              kind: "receipt",
+              status: "handoff",
+              saleId: target?.id,
+              receiptNo: doc.receiptNo,
+              to: toPhone,
+            }),
+          }).catch(() => {
+            /* non-fatal */
+          });
+        } catch (err) {
+          flash(
+            err instanceof Error ? err.message : "Could not open WhatsApp",
+            6000,
+            "err",
+          );
+        }
       }
 
-      const done = [
-        res.email?.ok ? `Email → ${res.email.to}` : null,
-        res.whatsapp?.ok ? "WhatsApp opened" : null,
-        res.sms?.ok ? `SMS → ${res.sms.to}` : null,
-      ].filter(Boolean);
-      flash(
-        `${res.receiptNo ? `${res.receiptNo} · ` : ""}${done.join(" · ")}`,
-        6000,
-      );
+      const remoteChannels = channels.filter((c) => c !== "whatsapp");
+      if (remoteChannels.length === 0) {
+        if (done.length > 0) {
+          flash(
+            `${receiptNo ? `${receiptNo} · ` : ""}${done.join(" · ")}`,
+            4000,
+          );
+        }
+        return;
+      }
+
+      // Email / SMS save in background — no spinner, toast only when finished.
+      background = true;
+      void (async () => {
+        try {
+          const res = await api<{
+            receiptNo?: string;
+            email?: { ok: boolean; to?: string; error?: string };
+            sms?: { ok: boolean; to?: string; error?: string };
+          }>("/api/notifications/send", {
+            method: "POST",
+            body: JSON.stringify({
+              channels: remoteChannels,
+              kind: "receipt",
+              saleId: target?.id,
+              toPhone,
+              toEmail: toEmail || undefined,
+              customerName: target ? target.customerName : customerName.trim(),
+              salesperson: target?.salesperson || salesperson,
+              payment: target ? target.payment : payment,
+              total: target ? target.total : subtotal,
+              lines,
+            }),
+          });
+
+          const parts = [
+            ...done,
+            res.email?.ok ? `Email → ${res.email.to}` : null,
+            res.sms?.ok ? `SMS → ${res.sms.to}` : null,
+          ].filter(Boolean);
+          const no = res.receiptNo || receiptNo;
+          flash(`${no ? `${no} · ` : ""}${parts.join(" · ")}`, 6000);
+        } catch (err) {
+          flash(
+            err instanceof Error ? err.message : "Could not send receipt",
+            8000,
+            "err",
+          );
+        } finally {
+          sendInFlight.current.delete(flightKey);
+        }
+      })();
     } catch (err) {
       flash(
         err instanceof Error ? err.message : "Could not send receipt",
@@ -813,7 +1116,7 @@ export default function PosPage() {
         "err",
       );
     } finally {
-      setReceiptBusy(null);
+      if (!background) sendInFlight.current.delete(flightKey);
     }
   }
 
@@ -833,9 +1136,9 @@ export default function PosPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Sales"
         title="POS Terminal"
-        description="Search products, quick buttons, remix BOM, oil-by-tola, refill, hold/resume bills (saved), and mixed payments."
+        description="F2 search · Enter add · F9 complete · phone autofills known customers."
+        className="!mb-3"
       />
 
       {toast ? (
@@ -850,287 +1153,387 @@ export default function PosPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <div className="space-y-4">
-          <Panel>
+      <div className="grid gap-5 xl:h-[calc(100vh-7.5rem)] xl:grid-cols-[1.45fr_1fr] xl:items-stretch">
+        {/* LEFT: search → big catalog grid → bottom tools */}
+        <div className="flex min-h-0 flex-col gap-3">
+          <Panel className="shrink-0 !p-4">
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-ink-muted" />
               <input
+                ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name, SKU, or category…"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  const first = catalog[0];
+                  if (!first) {
+                    flash("No products match this search", 3000, "err");
+                    return;
+                  }
+                  addProductSmart(first);
+                  setQuery("");
+                }}
+                placeholder="Search name, SKU, category, barcode… · Enter to add"
                 className="h-11 w-full rounded-full border border-line bg-mist pr-3 pl-10 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
               />
             </div>
-
-            <div className="mt-4">
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-                Quick Buttons
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {quick.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      if (p.category === "Customized Perfumes") addRemix();
-                      else if (p.unit === "ml") addOil(p, "tola");
-                      else addReady(p);
-                    }}
-                    className="rounded-lg border border-line bg-mist/50 px-3 py-2 text-left text-sm transition hover:border-gold/50 hover:bg-mist"
-                  >
-                    <span className="block font-medium text-ink">{p.name}</span>
-                    <span className="text-[11px] text-ink-muted">
-                      {formatMoney(p.sellPrice)}
-                      {p.unit === "ml" ? "/ml" : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {CATALOG_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setCatalogFilter(f.id)}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                    catalogFilter === f.id
+                      ? "border-ink bg-ink text-canvas"
+                      : "border-line bg-mist text-ink-muted hover:border-line-strong"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+              <span className="ml-auto self-center text-[11px] text-ink-muted">
+                {catalog.length} products
+              </span>
             </div>
-
-            {packagingProducts.length > 0 ? (
-              <div
-                className={`mt-4 rounded-xl border bg-paper px-4 py-3.5 transition ${
-                  hasRefillInCart ? "border-line-strong" : "border-line"
-                }`}
-              >
-                <div className="mb-3 flex items-start gap-2.5">
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-mist text-ink-soft">
-                    <Package className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-ink">
-                        Optional packaging
-                      </p>
-                      <Badge tone={hasRefillInCart ? "warning" : "neutral"}>
-                        {hasRefillInCart ? "Suggested for refill" : "Optional"}
-                      </Badge>
-                    </div>
-                    <p className="mt-0.5 text-xs text-ink-muted">
-                      Choose from the dropdowns below for refill sales.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-2.5 sm:grid-cols-2">
-                  {PACKAGING_GROUPS.map((group) => {
-                    const items = packagingByGroup[group.id];
-                    if (items.length === 0) return null;
-                    const selectedId = packagingPick[group.id] ?? "";
-                    return (
-                      <label key={group.id} className="block">
-                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-                          {group.label}
-                        </span>
-                        <select
-                          value={selectedId}
-                          onChange={(e) =>
-                            setPackagingForGroup(group.id, e.target.value)
-                          }
-                          className="h-10 w-full rounded-lg border border-line bg-canvas px-3 text-sm text-ink outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
-                        >
-                          <option value="">
-                            Select {group.label.toLowerCase()}…
-                          </option>
-                          {items.map((p) => {
-                            const out = p.stockSellable <= 0;
-                            return (
-                              <option
-                                key={p.id}
-                                value={p.id}
-                                disabled={out && p.id !== selectedId}
-                              >
-                                {p.name} · {formatMoney(p.sellPrice)}
-                                {out ? " — out" : ""}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
           </Panel>
 
-          <Panel padding={false}>
-            <div className="border-b border-line/70 px-5 py-3">
-              <p className="font-semibold text-lg text-ink">Catalog</p>
-              <p className="text-xs text-ink-muted">
-                {catalog.length} products · no barcode in Phase 1
-              </p>
-            </div>
-            <div className="scrollbar-thin max-h-[420px] overflow-y-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-mist/90 text-[11px] uppercase tracking-wider text-ink-muted backdrop-blur">
-                  <tr>
-                    <th className="px-5 py-2.5 font-medium">Product</th>
-                    <th className="px-3 py-2.5 font-medium">Stock</th>
-                    <th className="px-3 py-2.5 font-medium">Price</th>
-                    <th className="px-5 py-2.5 text-right font-medium">Add</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <Panel
+            padding={false}
+            className="flex min-h-[280px] flex-1 flex-col overflow-hidden"
+          >
+            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+              {catalog.length === 0 ? (
+                <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-ink-muted">
+                  No products in this filter
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4">
                   {catalog.map((p) => {
-                    const low = p.lowStockAt > 0 && p.stockSellable <= p.lowStockAt;
+                    const low =
+                      p.lowStockAt > 0 && p.stockSellable <= p.lowStockAt;
+                    const out = p.stockSellable <= 0;
                     return (
-                      <tr key={p.id} className="border-t border-line/60">
-                        <td className="px-5 py-3">
-                          <p className="font-medium">{p.name}</p>
-                          <p className="text-[11px] text-ink-muted">
-                            {p.sku} · {p.category}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3">
-                          <Badge tone={low ? "danger" : "success"}>
-                            {p.stockSellable} {p.unit}
+                      <div
+                        key={p.id}
+                        className={`flex flex-col rounded-xl border border-line/70 bg-mist/25 p-3 transition hover:border-gold/40 hover:bg-mist/40 ${
+                          out ? "opacity-50" : ""
+                        }`}
+                      >
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <Badge
+                            tone={out ? "danger" : low ? "warning" : "success"}
+                            className="h-5 max-w-full truncate px-2 text-[10px]"
+                          >
+                            {out
+                              ? "Out"
+                              : `${p.stockSellable} ${p.unit}`}
                           </Badge>
-                        </td>
-                        <td className="px-3 py-3">
-                          {formatMoney(p.sellPrice)}
-                          {p.unit === "ml" ? (
-                            <span className="text-ink-muted">/ml</span>
-                          ) : null}
-                        </td>
-                        <td className="px-5 py-3">
-                          <div className="flex justify-end gap-1">
+                          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-ink">
+                            {formatMoney(p.sellPrice)}
                             {p.unit === "ml" ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => addOil(p, "quarter_tola")}
-                                >
-                                  ¼
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => addOil(p, "half_tola")}
-                                >
-                                  ½
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  onClick={() => addOil(p, "tola")}
-                                >
-                                  1T
-                                </Button>
-                              </>
-                            ) : (
-                              <Button size="sm" onClick={() => addReady(p)}>
-                                <Plus className="h-3.5 w-3.5" />
-                                Add
+                              <span className="font-normal text-ink-muted">
+                                /ml
+                              </span>
+                            ) : null}
+                          </span>
+                        </div>
+                        <p className="line-clamp-2 text-sm font-medium leading-snug text-ink">
+                          {p.name}
+                        </p>
+                        <p className="mt-0.5 truncate text-[10px] text-ink-muted">
+                          {p.sku} · {p.category}
+                        </p>
+                        <div className="mt-auto flex gap-1.5 pt-3">
+                          {p.unit === "ml" ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-8 flex-1 px-0"
+                                disabled={out}
+                                title={out ? "Out of stock" : "¼ tola"}
+                                onClick={() => addOil(p, "quarter_tola")}
+                              >
+                                ¼
                               </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-8 flex-1 px-0"
+                                disabled={out}
+                                title={out ? "Out of stock" : "½ tola"}
+                                onClick={() => addOil(p, "half_tola")}
+                              >
+                                ½
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                className="h-8 flex-1 px-0"
+                                disabled={out}
+                                title={out ? "Out of stock" : "1 tola"}
+                                onClick={() => addOil(p, "tola")}
+                              >
+                                1T
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              className="h-8 w-full"
+                              disabled={out}
+                              title={out ? "Out of stock" : undefined}
+                              onClick={() =>
+                                p.category === "Customized Perfumes"
+                                  ? addRemix()
+                                  : addReady(p)
+                              }
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {out ? "Out" : "Add"}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
+          </Panel>
+
+          {/* Bottom tool strip: Packaging | Quick Add */}
+          <Panel className="shrink-0 !p-3">
+            <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: "quick" as const, label: "Quick Add" },
+                  { id: "packaging" as const, label: "Packaging" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setToolStrip(tab.id)}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                    toolStrip === tab.id
+                      ? "border-ink bg-ink text-canvas"
+                      : "border-line bg-mist text-ink-muted hover:border-line-strong"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              {toolStrip === "packaging" && hasRefillInCart ? (
+                <Badge tone="warning">Suggested for refill</Badge>
+              ) : null}
+            </div>
+
+            {toolStrip === "quick" ? (
+              <div className="flex flex-wrap gap-1.5">
+                {quick.length === 0 ? (
+                  <p className="text-xs text-ink-muted">
+                    No quick-button products configured
+                  </p>
+                ) : (
+                  quick.map((p) => {
+                    const out = p.stockSellable <= 0;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={out}
+                        title={out ? "Out of stock" : undefined}
+                        onClick={() => {
+                          if (p.category === "Customized Perfumes") addRemix();
+                          else if (p.unit === "ml") addOil(p, "tola");
+                          else addReady(p);
+                        }}
+                        className="rounded-lg border border-line bg-mist/50 px-2.5 py-1.5 text-left text-xs transition hover:border-gold/50 hover:bg-mist disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span className="block font-medium text-ink">
+                          {p.name}
+                        </span>
+                        <span className="text-[10px] text-ink-muted">
+                          {out
+                            ? "Out"
+                            : `${formatMoney(p.sellPrice)}${p.unit === "ml" ? "/ml" : ""}`}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            ) : packagingProducts.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {PACKAGING_GROUPS.map((group) => {
+                  const items = packagingByGroup[group.id];
+                  if (items.length === 0) return null;
+                  const selectedId = packagingPick[group.id] ?? "";
+                  return (
+                    <label key={group.id} className="block min-w-0">
+                      <span className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+                        <Package className="h-3 w-3" />
+                        {group.label}
+                      </span>
+                      <select
+                        value={selectedId}
+                        onChange={(e) =>
+                          setPackagingForGroup(group.id, e.target.value)
+                        }
+                        className="h-9 w-full rounded-lg border border-line bg-canvas px-2.5 text-xs text-ink outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                      >
+                        <option value="">
+                          Select {group.label.toLowerCase()}…
+                        </option>
+                        {items.map((p) => {
+                          const out = p.stockSellable <= 0;
+                          return (
+                            <option
+                              key={p.id}
+                              value={p.id}
+                              disabled={out && p.id !== selectedId}
+                            >
+                              {p.name} · {formatMoney(p.sellPrice)}
+                              {out ? " — out" : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-ink-muted">No packaging products</p>
+            )}
           </Panel>
         </div>
 
-        <Panel className="h-fit xl:sticky xl:top-20">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-xl text-ink">Current Bill</h2>
-              <p className="text-xs text-ink-muted">
-                {itemCount} items · {heldList.length} held
-              </p>
+        <Panel className="flex min-h-0 flex-col overflow-hidden !p-4 xl:h-[calc(100vh-7.5rem)] xl:sticky xl:top-[4.5rem]">
+          {/* Fixed header */}
+          <div className="shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="font-semibold text-lg text-ink">Current Bill</h2>
+                <p className="text-[11px] text-ink-muted">
+                  {itemCount} items · {heldList.length} held
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {salespeople.length > 0 ? (
+                  <select
+                    value={salesperson}
+                    disabled={switchingSalesperson}
+                    onChange={(e) => void switchSalesperson(e.target.value)}
+                    title="Active salesperson"
+                    className="h-8 max-w-[9rem] truncate rounded-full border border-line bg-mist px-2 text-[11px] outline-none focus:border-gold disabled:opacity-60"
+                  >
+                    {salespeople.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <Badge tone={cart.length > 0 ? "success" : "neutral"}>
+                  {cart.length > 0 ? "Live" : "Idle"}
+                </Badge>
+              </div>
             </div>
-            <Badge tone={cart.length > 0 ? "success" : "neutral"}>
-              {cart.length > 0 ? "Live" : "Idle"}
-            </Badge>
+
+            {/* Line 1: name */}
+            <label className="mt-3 block">
+              <span className="text-[11px] font-medium text-ink-muted">
+                Name
+              </span>
+              <input
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Customer name"
+                className="mt-1 h-9 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+              />
+            </label>
+
+            {/* Line 2: contact — equal label rows so inputs align */}
+            <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <label className="min-w-0 block">
+                <span className="flex h-4 items-center gap-1 text-[11px] font-medium leading-none text-ink-muted">
+                  Phone
+                  {customerMatch ? (
+                    <Badge tone="success" className="h-4 px-1.5 text-[9px]">
+                      Known
+                    </Badge>
+                  ) : null}
+                </span>
+                <input
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    if (digitsOnly(e.target.value).length < 7) {
+                      setCustomerMatch(null);
+                    }
+                  }}
+                  placeholder="+971 …"
+                  inputMode="tel"
+                  className="mt-1 box-border h-9 w-full rounded-full border border-line bg-mist px-3 text-sm leading-normal outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                />
+              </label>
+              <label className="min-w-0 block">
+                <span className="flex h-4 items-center text-[11px] font-medium leading-none text-ink-muted">
+                  Email
+                </span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="email@…"
+                  className="mt-1 box-border h-9 w-full rounded-full border border-line bg-mist px-3 text-sm leading-normal outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                />
+              </label>
+            </div>
           </div>
 
-          <label className="mt-4 block">
-            <span className="text-xs font-medium text-ink-muted">
-              Customer name
-            </span>
-            <input
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Customer name"
-              className="mt-1.5 h-10 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
-            />
-          </label>
-
-          <label className="mt-3 block">
-            <span className="text-xs font-medium text-ink-muted">
-              Customer phone (required)
-            </span>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+971 …"
-              className="mt-1.5 h-10 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
-            />
-          </label>
-
-          <label className="mt-3 block">
-            <span className="text-xs font-medium text-ink-muted">
-              Customer email (for emailed receipt)
-            </span>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="customer@email.com"
-              className="mt-1.5 h-10 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
-            />
-          </label>
-
-          <div className="mt-3 rounded-lg border border-line/70 bg-mist/40 px-3 py-2.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-              Active salesperson
-            </p>
-            <p className="mt-1 text-sm font-medium text-ink">
-              {salesperson || "Not set — open Settings → Sales Team"}
-            </p>
-            <p className="mt-1 text-[11px] text-ink-muted">
-              Change this from Settings only (locked on POS).
-            </p>
-          </div>
-
-          <div className="scrollbar-thin mt-4 max-h-64 space-y-2 overflow-y-auto">
+          {/* Only cart / held scrolls */}
+          <div className="scrollbar-thin mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
             {cart.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-line bg-mist/40 px-4 py-10 text-center text-sm text-ink-muted">
+              <div className="rounded-lg border border-dashed border-line bg-mist/40 px-3 py-8 text-center text-sm text-ink-muted">
                 Cart is empty — add products or remix
               </div>
             ) : (
               cart.map((line) => (
                 <div
                   key={line.key}
-                  className="rounded-lg border border-line/70 bg-mist/30 px-3 py-2.5"
+                  className="rounded-lg border border-line/70 bg-mist/30 px-3 py-2"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium">{line.product.name}</p>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {line.product.name}
+                      </p>
                       <p className="text-[11px] text-ink-muted">
                         {line.unitLabel} · {line.lineType}
-                        {line.oilProductName ? ` · oil: ${line.oilProductName}` : ""}
+                        {line.oilProductName
+                          ? ` · oil: ${line.oilProductName}`
+                          : ""}
                       </p>
                       {line.bomNote ? (
-                        <p className="mt-1 text-[10px] text-sage">{line.bomNote}</p>
+                        <p className="mt-0.5 text-[10px] text-sage">
+                          {line.bomNote}
+                        </p>
                       ) : null}
                     </div>
                     <button
                       type="button"
                       onClick={() => removeLine(line.key)}
-                      className="text-ink-muted hover:text-coral"
+                      className="shrink-0 text-ink-muted hover:text-coral"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <div className="mt-2 flex items-center justify-between">
+                  <div className="mt-1.5 flex items-center justify-between">
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -1159,32 +1562,37 @@ export default function PosPage() {
             )}
           </div>
 
-          <div className="mt-4 space-y-2 border-t border-line/70 pt-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-ink-muted">Subtotal</span>
-              <span className="font-medium">{formatMoney(subtotal)}</span>
+          {/* Fixed footer — always on screen */}
+          <div className="shrink-0 border-t border-line/70 pt-3">
+            <div className="flex items-end justify-between gap-2">
+              <div className="min-w-0 text-[11px] text-ink-muted">
+                {vatPercent > 0 ? (
+                  <>
+                    <p>
+                      Net {formatMoney(netAmount)} · VAT {vatPercent}%{" "}
+                      {formatMoney(vatAmount)}
+                    </p>
+                    <p className="text-[10px]">Prices include VAT</p>
+                  </>
+                ) : (
+                  <p>Subtotal</p>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-[11px] text-ink-muted">Total</p>
+                <p className="font-semibold text-xl tabular-nums leading-none">
+                  {formatMoney(subtotal)}
+                </p>
+              </div>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-ink-muted">Tax</span>
-              <span className="font-medium">—</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-semibold text-lg">Total</span>
-              <span className="font-semibold text-xl">{formatMoney(subtotal)}</span>
-            </div>
-          </div>
 
-          <div className="mt-4">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-              Payment
-            </p>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="mt-2.5 grid grid-cols-5 gap-1">
               {payments.map((p) => (
                 <button
                   key={p.id}
                   type="button"
                   onClick={() => setPayment(p.id)}
-                  className={`flex flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[10px] font-medium transition ${
+                  className={`flex min-h-10 flex-col items-center justify-center gap-0.5 rounded-lg border px-0.5 py-1 text-[9px] font-medium transition ${
                     payment === p.id
                       ? "border-ink bg-ink text-canvas"
                       : "border-line bg-mist text-ink-muted hover:border-line-strong"
@@ -1195,48 +1603,241 @@ export default function PosPage() {
                 </button>
               ))}
             </div>
-          </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
             <Button
+              className="mt-2 w-full"
               variant="secondary"
+              size="sm"
               disabled={cart.length === 0 || holding || checkingOut}
               onClick={() => void holdBill()}
             >
-              <Pause className="h-4 w-4" />
-              {holding ? "Holding…" : "Hold"}
+              <Pause className="h-3.5 w-3.5" />
+              Hold bill
             </Button>
-            <Button
-              variant="secondary"
-              disabled={heldList.length === 0 || cart.length > 0 || !!resumingId}
-              onClick={() => {
-                if (heldList[0]) void resumeHeld(heldList[0]);
-              }}
-            >
-              <Play className="h-4 w-4" />
-              {resumingId === heldList[0]?.id ? "Resuming…" : "Resume latest"}
-            </Button>
-          </div>
 
-          <div className="mt-4 border-t border-line/70 pt-4">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-                Receipt delivery
-              </p>
-              <Badge tone={cart.length > 0 ? "warning" : lastSale ? "success" : "neutral"}>
-                {cart.length > 0
-                  ? "Draft bill"
-                  : lastSale
-                    ? "Last sale"
-                    : "No bill"}
-              </Badge>
+            {cart.length > 0 ? (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={receiptBusy !== null}
+                  onClick={() => printCurrent("thermal")}
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  {receiptBusy === "print-thermal" ? "…" : "80mm"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={receiptBusy !== null}
+                  onClick={() => printCurrent("a4")}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  {receiptBusy === "print-a4" ? "…" : "A4"}
+                </Button>
+              </div>
+            ) : null}
+
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-ink-muted">
+              <input
+                type="checkbox"
+                checked={printAfterComplete}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setPrintAfterComplete(on);
+                  if (settings.data) {
+                    void api<AppSettings>("/api/settings", {
+                      method: "PUT",
+                      body: JSON.stringify({
+                        ...settings.data,
+                        autoPrintReceipt: on,
+                      }),
+                    })
+                      .then((updated) => settings.setData(updated))
+                      .catch(() => undefined);
+                  }
+                }}
+                className="h-3.5 w-3.5 accent-[var(--gold,#b8912f)]"
+              />
+              Print after complete
+            </label>
+
+            <Button
+              className="mt-2 w-full"
+              variant="gold"
+              disabled={cart.length === 0 || checkingOut || holding}
+              onClick={checkout}
+            >
+              {`Complete Sale · ${formatMoney(subtotal)}`}
+            </Button>
+            <p className="mt-1 text-center text-[10px] text-ink-muted">
+              Shortcut · F9
+            </p>
+
+            {/* Held bills dropdown — below Complete */}
+            {heldList.length > 0 ? (
+              <div className="relative mt-2">
+                <button
+                  type="button"
+                  onClick={() => setHeldMenuOpen((o) => !o)}
+                  className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line bg-mist/50 px-3 text-left text-xs font-medium text-ink transition hover:border-line-strong"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Badge tone="warning">{heldList.length}</Badge>
+                    <span className="truncate">
+                      Held ·{" "}
+                      {heldList[0].customerName &&
+                      heldList[0].customerName !== "Walk-in Customer"
+                        ? heldList[0].customerName
+                        : heldList[0].customerPhone || "Bill"}
+                      {heldList[0].salesperson
+                        ? ` · ${heldList[0].salesperson}`
+                        : ""}
+                      {heldList.length > 1 ? ` (+${heldList.length - 1})` : ""}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 shrink-0 text-ink-muted transition ${
+                      heldMenuOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                {heldMenuOpen ? (
+                  <div className="absolute bottom-full left-0 right-0 z-30 mb-1 max-h-56 space-y-1.5 overflow-y-auto rounded-xl border border-line bg-canvas p-2 shadow-lg">
+                    {cart.length > 0 ? (
+                      <p className="px-2 py-1.5 text-[11px] text-ink-muted">
+                        Complete or clear the cart before resuming a held bill.
+                      </p>
+                    ) : null}
+                    {heldList.map((sale) => {
+                      const lineCount = sale.lines?.length ?? 0;
+                      const busy =
+                        resumingId === sale.id || discardingId === sale.id;
+                      const title =
+                        sale.customerName &&
+                        sale.customerName !== "Walk-in Customer"
+                          ? sale.customerName
+                          : sale.customerPhone || "No phone";
+                      return (
+                        <div
+                          key={sale.id}
+                          className="rounded-lg border border-line/70 bg-mist/30 px-2.5 py-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-ink">
+                                {title}
+                              </p>
+                              <p className="truncate text-[11px] text-ink-muted">
+                                Salesperson:{" "}
+                                {sale.salesperson || "Not assigned"}
+                              </p>
+                              <p className="truncate text-[11px] text-ink-muted">
+                                {sale.customerPhone || "—"} · {sale.time || "—"}{" "}
+                                · {lineCount} line
+                                {lineCount === 1 ? "" : "s"} ·{" "}
+                                {formatMoney(sale.total)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void discardHeld(sale)}
+                              className="shrink-0 text-ink-muted hover:text-coral disabled:opacity-40"
+                              title="Discard held bill"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <Button
+                            className="mt-1.5 w-full"
+                            size="sm"
+                            variant="secondary"
+                            disabled={cart.length > 0 || busy}
+                            onClick={() => {
+                              setHeldMenuOpen(false);
+                              void resumeHeld(sale);
+                            }}
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            {resumingId === sale.id ? "Resuming…" : "Resume"}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </Panel>
+      </div>
+
+      {saleDoneOpen && lastSale ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 sm:items-center"
+          onClick={() => setSaleDoneOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setSaleDoneOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sale-done-title"
+            className="animate-fade-up w-full max-w-md rounded-2xl border border-line bg-canvas p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold-deep">
+                <CheckCircle2 className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3
+                  id="sale-done-title"
+                  className="font-semibold text-lg text-ink"
+                >
+                  Sale complete
+                </h3>
+                <p className="mt-0.5 text-sm text-ink-muted">
+                  {formatMoney(lastSale.total)} · {lastSale.payment}
+                  {lastSale.customerName
+                    ? ` · ${lastSale.customerName}`
+                    : lastSale.phone
+                      ? ` · ${lastSale.phone}`
+                      : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSaleDoneOpen(false)}
+                className="text-ink-muted hover:text-ink"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
+            <Button
+              className="mt-4 w-full"
+              variant="gold"
+              onClick={() => {
+                setSaleDoneOpen(false);
+                searchRef.current?.focus();
+              }}
+            >
+              Next customer
+            </Button>
+
+            <p className="mt-4 mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+              Receipt options (optional)
+            </p>
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="secondary"
                 disabled={receiptBusy !== null}
-                onClick={() => printCurrent("thermal")}
+                onClick={() => void printSale(lastSale, "thermal", false)}
               >
                 <Printer className="h-4 w-4" />
                 {receiptBusy === "print-thermal" ? "Printing…" : "Print 80mm"}
@@ -1244,30 +1845,28 @@ export default function PosPage() {
               <Button
                 variant="secondary"
                 disabled={receiptBusy !== null}
-                onClick={() => printCurrent("a4")}
+                onClick={() => void printSale(lastSale, "a4", false)}
               >
                 <FileText className="h-4 w-4" />
                 {receiptBusy === "print-a4" ? "Printing…" : "A4 / PDF"}
               </Button>
               <Button
                 variant="secondary"
-                disabled={receiptBusy !== null}
                 onClick={() => void sendReceipt(["whatsapp"])}
               >
                 <MessageCircle className="h-4 w-4" />
-                {receiptBusy === "whatsapp" ? "Opening…" : "WhatsApp"}
+                WhatsApp
               </Button>
               <Button
                 variant="secondary"
-                disabled={receiptBusy !== null}
                 onClick={() => void sendReceipt(["email"])}
               >
                 <Mail className="h-4 w-4" />
-                {receiptBusy === "email" ? "Sending…" : "Email"}
+                Email
               </Button>
               <Button
                 variant="secondary"
-                disabled={receiptBusy !== null || !smsAvailable}
+                disabled={!smsAvailable}
                 title={
                   smsAvailable
                     ? undefined
@@ -1276,11 +1875,10 @@ export default function PosPage() {
                 onClick={() => void sendReceipt(["sms"])}
               >
                 <Smartphone className="h-4 w-4" />
-                {receiptBusy === "sms" ? "Sending…" : "SMS"}
+                SMS
               </Button>
               <Button
                 variant="secondary"
-                disabled={receiptBusy !== null}
                 onClick={() =>
                   void sendReceipt(
                     smsAvailable
@@ -1292,94 +1890,14 @@ export default function PosPage() {
                 Send all
               </Button>
             </div>
-
-            <p className="mt-2 text-[11px] text-ink-muted">
-              {cart.length > 0
-                ? "Live cart prints as a draft bill. Complete the sale for a numbered receipt."
-                : lastSale
-                  ? `Last sale ${formatMoney(lastSale.total)} · ${lastSale.phone || "no phone"} — reprints are marked REPRINT.`
-                  : "Complete a sale to print or send a numbered receipt."}
-              {smsAvailable ? "" : " SMS is off until Twilio keys are set."}
-            </p>
+            {!smsAvailable ? (
+              <p className="mt-2 text-center text-[11px] text-ink-muted">
+                SMS is off until Twilio keys are set.
+              </p>
+            ) : null}
           </div>
-
-          {heldList.length > 0 ? (
-            <div className="mt-4 border-t border-line/70 pt-4">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-                  Held bills
-                </p>
-                <Badge tone="warning">{heldList.length}</Badge>
-              </div>
-              <div className="scrollbar-thin max-h-48 space-y-2 overflow-y-auto">
-                {heldList.map((sale) => {
-                  const lineCount = sale.lines?.length ?? 0;
-                  const busy =
-                    resumingId === sale.id || discardingId === sale.id;
-                  return (
-                    <div
-                      key={sale.id}
-                      className="rounded-lg border border-line/70 bg-mist/30 px-3 py-2.5"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium text-ink">
-                            {sale.customerName &&
-                            sale.customerName !== "Walk-in Customer"
-                              ? sale.customerName
-                              : sale.customerPhone || "No phone"}
-                          </p>
-                          <p className="text-[11px] text-ink-muted">
-                            {sale.customerName &&
-                            sale.customerName !== "Walk-in Customer"
-                              ? `${sale.customerPhone || "No phone"} · `
-                              : ""}
-                            {sale.time || "—"} · {lineCount} line
-                            {lineCount === 1 ? "" : "s"} ·{" "}
-                            {formatMoney(sale.total)}
-                          </p>
-                          <p className="text-[11px] text-ink-muted">
-                            Salesperson: {sale.salesperson || "Not assigned"}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void discardHeld(sale)}
-                          className="text-ink-muted hover:text-coral disabled:opacity-40"
-                          title="Discard held bill"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                      <Button
-                        className="mt-2 w-full"
-                        size="sm"
-                        variant="secondary"
-                        disabled={cart.length > 0 || busy}
-                        onClick={() => void resumeHeld(sale)}
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                        {resumingId === sale.id ? "Resuming…" : "Resume"}
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-
-          <Button
-            className="mt-3 w-full"
-            variant="gold"
-            size="lg"
-            disabled={cart.length === 0 || checkingOut || holding}
-            onClick={checkout}
-          >
-            {checkingOut ? "Completing…" : `Complete Sale · ${formatMoney(subtotal)}`}
-          </Button>
-        </Panel>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

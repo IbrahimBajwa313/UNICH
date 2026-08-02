@@ -148,6 +148,9 @@ body {
 .stagger-4 {
   animation-delay: 0.2s;
 }
+.stagger-5 {
+  animation-delay: 0.25s;
+}
 
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;

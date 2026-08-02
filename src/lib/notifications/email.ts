@@ -11,6 +11,13 @@ export type SendEmailResult =
   | { ok: true; id: string }
   | { ok: false; error: string };
 
+let resendClient: Resend | null = null;
+
+function getResend(apiKey: string): Resend {
+  if (!resendClient) resendClient = new Resend(apiKey);
+  return resendClient;
+}
+
 export async function sendEmail(
   input: SendEmailInput,
 ): Promise<SendEmailResult> {
@@ -29,13 +36,14 @@ export async function sendEmail(
   }
 
   try {
-    const resend = new Resend(apiKey);
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await getResend(apiKey).emails.send({
       from,
       to: input.to.trim(),
       subject: input.subject,
       text: input.text,
-      html: input.html || `<pre style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(input.text)}</pre>`,
+      html:
+        input.html ||
+        `<pre style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(input.text)}</pre>`,
     });
 
     if (error) {

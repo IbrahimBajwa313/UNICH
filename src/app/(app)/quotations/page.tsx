@@ -8,6 +8,10 @@ import { Panel } from "@/components/ui/Panel";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
 import { api } from "@/lib/api";
 import { formatMoney, formatDate } from "@/lib/format";
+import {
+  buildWhatsAppUrl,
+  formatQuotationMessage,
+} from "@/lib/notifications/whatsapp";
 import type { Quotation, QuotationStatus } from "@/lib/types";
 
 const statuses: QuotationStatus[] = [
@@ -48,18 +52,49 @@ export default function QuotationsPage() {
 
   async function shareQuotation(q: Quotation) {
     try {
+      // Open WhatsApp immediately — don't wait on email/CRM lookup.
+      try {
+        const message = formatQuotationMessage({
+          number: q.number,
+          customerName: q.customerName,
+          total: q.total,
+          items: q.items,
+          date: q.date,
+          expiry: q.expiry,
+        });
+        window.open(
+          buildWhatsAppUrl(q.customerPhone, message),
+          "_blank",
+          "noopener,noreferrer",
+        );
+        void api("/api/notifications/log", {
+          method: "POST",
+          body: JSON.stringify({
+            channel: "whatsapp",
+            kind: "quotation",
+            status: "handoff",
+            quotationId: q.id,
+            to: q.customerPhone,
+          }),
+        }).catch(() => {
+          /* non-fatal */
+        });
+      } catch {
+        /* WhatsApp hand-off failed — email may still succeed */
+      }
+
       const res = await api<{
-        whatsapp?: { ok: boolean; url?: string; error?: string };
         email?: { ok: boolean; to?: string; error?: string };
       }>("/api/notifications/send", {
         method: "POST",
         body: JSON.stringify({
-          channel: "both",
+          channels: ["email"],
           kind: "quotation",
           toPhone: q.customerPhone,
           customerName: q.customerName,
           total: q.total,
           quotation: {
+            id: q.id,
             number: q.number,
             items: q.items,
             date: q.date,
@@ -70,15 +105,11 @@ export default function QuotationsPage() {
 
       if (!res.email?.ok) {
         flash(
-          `EMAIL FAILED: ${res.email?.error || "Add customer email in CRM (test: jezra6127@gmail.com)"}`,
+          `WhatsApp opened · EMAIL FAILED: ${res.email?.error || "Add customer email in CRM"}`,
           8000,
           "err",
         );
         return;
-      }
-
-      if (res.whatsapp?.url) {
-        window.open(res.whatsapp.url, "_blank", "noopener,noreferrer");
       }
 
       flash(`Email sent to ${res.email.to} · WhatsApp opened`, 6000, "ok");

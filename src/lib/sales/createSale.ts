@@ -8,7 +8,6 @@ import {
 import { AppSettings, Customer, Sale } from "@/lib/models";
 import { SaleError } from "@/lib/sales/errors";
 import {
-  tryFastValidateSaleLines,
   validateSaleLines,
   type IncomingSaleLine,
   type ValidatedSaleLine,
@@ -41,33 +40,44 @@ export type CreateSaleInput = {
 
 /** Short TTL cache — AppSettings rarely changes during a POS shift. */
 let salespersonCache:
-  | { at: number; salespeople: string[]; active: string; fallback: string }
+  | { at: number; salespeople: string[]; active: string }
   | null = null;
 const SALESPERSON_CACHE_MS = 120_000;
 
 /** Primary-only ack — much faster than connection-string w=majority on Atlas. */
 const FAST_WC = { w: 1 as const, j: false };
 
+function isDuplicateKey(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code?: number }).code === 11000
+  );
+}
+
 async function resolveSalesperson(value?: string) {
   const now = Date.now();
   if (!salespersonCache || now - salespersonCache.at > SALESPERSON_CACHE_MS) {
     const settings = await AppSettings.findOne({ key: "default" })
-      .select("salespeople currentUserName activeSalesperson")
+      .select("salespeople activeSalesperson")
       .lean();
     const configured = Array.isArray(settings?.salespeople)
       ? settings.salespeople
           .map((name: unknown) => String(name).trim())
           .filter(Boolean)
       : [];
-    const fallback = String(
-      settings?.currentUserName || "Ahmad Ibrahim",
-    ).trim();
-    const salespeople = configured.length > 0 ? configured : [fallback];
+    if (configured.length === 0) {
+      throw new SaleError(
+        "VALIDATION",
+        "Set an active salesperson in Settings → Sales Team",
+      );
+    }
     const active = String(
       (settings as { activeSalesperson?: string } | null)?.activeSalesperson ||
         "",
     ).trim();
-    salespersonCache = { at: now, salespeople, active, fallback };
+    salespersonCache = { at: now, salespeople: configured, active };
   }
 
   const { salespeople, active } = salespersonCache;
@@ -82,10 +92,13 @@ async function resolveSalesperson(value?: string) {
       (name: string) => name.toLowerCase() === requested.toLowerCase(),
     );
     if (matched) return matched;
+    throw new SaleError("VALIDATION", `Unknown salesperson: ${requested}`);
   }
 
-  if (salespeople[0]) return salespeople[0];
-  throw new SaleError("VALIDATION", "Set an active salesperson in Settings");
+  throw new SaleError(
+    "VALIDATION",
+    "Set an active salesperson in Settings → Sales Team",
+  );
 }
 
 function coalesceDeductions(
@@ -213,8 +226,6 @@ async function holdSale(input: CreateSaleInput) {
       $setOnInsert: {
         phone,
         preferences: [],
-        totalPurchases: 0,
-        creditBalance: 0,
         ...(givenName ? {} : { name: "Walk-in Customer" }),
       },
       ...(givenName ? { $set: { name: givenName } } : {}),
@@ -266,12 +277,32 @@ async function rollbackAudit(audit: DeductionAuditEntry[]) {
   );
 }
 
+async function rollbackCustomerTotals(
+  phone: string,
+  subtotal: number,
+  payment: string,
+) {
+  await Customer.updateOne(
+    { phone },
+    {
+      $inc: {
+        totalPurchases: -subtotal,
+        ...(payment === "credit" ? { creditBalance: -subtotal } : {}),
+      },
+    },
+    { writeConcern: FAST_WC },
+  ).catch(() => {
+    /* best-effort */
+  });
+}
+
 /**
- * POS complete — target 1–3s on Atlas:
- * 1) fast retail validate (0 DB) or full validate
- * 2) parallel: stock deduct + customer upsert
- * 3) one Sale.insert
- * Idempotency relies on unique index (no pre-read).
+ * POS complete — target ≤2–3s on Atlas:
+ * 1) validate (batched product/formula reads; DB prices + backend oil ml)
+ * 2) parallel: atomic FIFO deduct + customer upsert (w:1)
+ * 3) Sale.insert
+ * Stock enforced by atomic stockSellable reserve — no extra pre-check RTT.
+ * Failures compensate stock + customer totals (no slow multi-doc txn).
  */
 export async function createSale(input: CreateSaleInput) {
   const status = input.status ?? "completed";
@@ -290,23 +321,15 @@ export async function createSale(input: CreateSaleInput) {
   const idempotencyKey = input.idempotencyKey?.trim() || undefined;
   const givenName = input.customerName?.trim();
 
-  // Validate + salesperson in parallel (salesperson usually cached → instant)
-  const fast = tryFastValidateSaleLines(input.lines);
   const [salesperson, validated] = await Promise.all([
     resolveSalesperson(input.salesperson),
-    fast
-      ? Promise.resolve(fast)
-      : validateSaleLines(input.lines),
+    validateSaleLines(input.lines),
   ]);
-
-  let audit: DeductionAuditEntry[] = [];
 
   const customerUpdate = {
     $setOnInsert: {
       phone,
       preferences: [] as string[],
-      totalPurchases: 0,
-      creditBalance: 0,
       ...(givenName ? {} : { name: "Walk-in Customer" }),
     },
     $set: {
@@ -321,8 +344,11 @@ export async function createSale(input: CreateSaleInput) {
     },
   };
 
+  let audit: DeductionAuditEntry[] = [];
+  let customerTouched = false;
+
   try {
-    // Critical path: deduct stock + upsert customer together
+    // Critical path: deduct stock + upsert customer in parallel
     const [deductionAudit, customer] = await Promise.all([
       validated.deductions.length > 0
         ? applyDeductions(validated.deductions)
@@ -335,6 +361,7 @@ export async function createSale(input: CreateSaleInput) {
       }),
     ]);
     audit = deductionAudit;
+    customerTouched = true;
 
     if (!customer) {
       throw new SaleError("VALIDATION", "Could not resolve customer");
@@ -364,26 +391,26 @@ export async function createSale(input: CreateSaleInput) {
     const productIds = [...new Set(audit.map((a) => a.productId))];
     if (productIds.length > 0) {
       void refreshCostFifo(productIds).catch(() => {
-        /* non-fatal */
+        /* non-fatal — after response */
       });
     }
 
     return { sale: docs[0], deduplicated: false as const };
   } catch (err) {
-    if (
-      idempotencyKey &&
-      err &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as { code?: number }).code === 11000
-    ) {
+    if (idempotencyKey && isDuplicateKey(err)) {
       const dup = await Sale.findOne({ idempotencyKey });
       if (dup) {
         if (audit.length) await rollbackAudit(audit);
+        if (customerTouched) {
+          await rollbackCustomerTotals(phone, validated.subtotal, input.payment);
+        }
         return { sale: dup, deduplicated: true as const };
       }
     }
     if (audit.length) await rollbackAudit(audit);
+    if (customerTouched) {
+      await rollbackCustomerTotals(phone, validated.subtotal, input.payment);
+    }
     throw err;
   }
 }

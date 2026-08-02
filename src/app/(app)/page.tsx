@@ -39,7 +39,7 @@ export default function DashboardPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           label="Today's Sales"
           value={formatMoney(stats.todaySales)}
@@ -58,14 +58,32 @@ export default function DashboardPage() {
           hint="auto BOM deducted"
           delay="stagger-3"
         />
-        <Stat
-          label="Low Stock SKUs"
-          value={String(stats.lowStockCount)}
-          trend={stats.lowStockCount > 0 ? "Action needed" : undefined}
-          trendUp={false}
-          hint="thresholds applied"
-          delay="stagger-4"
-        />
+        <Link
+          href="/inventory"
+          className="block rounded-[var(--radius)] transition hover:ring-2 hover:ring-gold/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+        >
+          <Stat
+            label="Inventory Value"
+            value={formatMoney(stats.fifoValue)}
+            hint="FIFO sellable →"
+            delay="stagger-4"
+            className="h-full"
+          />
+        </Link>
+        <Link
+          href="/inventory/low-stock"
+          className="block rounded-[var(--radius)] transition hover:ring-2 hover:ring-gold/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+        >
+          <Stat
+            label="Low Stock SKUs"
+            value={String(stats.lowStockCount)}
+            trend={stats.lowStockCount > 0 ? "Action needed" : undefined}
+            trendUp={false}
+            hint="View all →"
+            delay="stagger-5"
+            className="h-full"
+          />
+        </Link>
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-3">
@@ -83,10 +101,18 @@ export default function DashboardPage() {
             title="Alerts"
             subtitle="Stock & reports"
             action={
-              <Badge tone="danger">
-                <AlertTriangle className="h-3 w-3" />
-                {alerts.length}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/inventory/low-stock"
+                  className="text-xs font-medium text-gold-deep hover:underline"
+                >
+                  Low stock →
+                </Link>
+                <Badge tone="danger">
+                  <AlertTriangle className="h-3 w-3" />
+                  {alerts.length}
+                </Badge>
+              </div>
             }
           />
           <ul className="space-y-3">

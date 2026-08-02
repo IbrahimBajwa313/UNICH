@@ -1,4 +1,5 @@
 import { clsx } from "@/lib/format";
+import { forwardRef } from "react";
 
 interface PanelProps {
   children: React.ReactNode;
@@ -6,19 +7,22 @@ interface PanelProps {
   padding?: boolean;
 }
 
-export function Panel({ children, className, padding = true }: PanelProps) {
-  return (
-    <div
-      className={clsx(
-        "rounded-[var(--radius)] border border-line/80 bg-paper shadow-[var(--shadow-soft)]",
-        padding && "p-5",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
+export const Panel = forwardRef<HTMLDivElement, PanelProps>(
+  function Panel({ children, className, padding = true }, ref) {
+    return (
+      <div
+        ref={ref}
+        className={clsx(
+          "rounded-[var(--radius)] border border-line/80 bg-paper shadow-[var(--shadow-soft)]",
+          padding && "p-5",
+          className,
+        )}
+      >
+        {children}
+      </div>
+    );
+  },
+);
 
 export function PanelHeader({
   title,

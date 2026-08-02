@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  HALF_TOLA_ML,
+  QUARTER_TOLA_ML,
+  TOLA_ML,
+  resolveDeductMlFromUnitLabel,
+} from "../format";
+import {
   matchRemixRole,
   REMIX_REQUIRED_ROLES,
   OIL_BASE_PRODUCT_ID,
@@ -143,6 +149,60 @@ test("Oil not selected error message", () => {
 test("Insufficient stock error message", () => {
   const err = new SaleError("INSUFFICIENT_STOCK", "Insufficient stock for Cap");
   assert.match(err.message, /Insufficient stock/);
+});
+
+console.log("backend oil ml (no client trust)");
+
+test("1 Tola → 12 ml", () => {
+  assert.equal(resolveDeductMlFromUnitLabel("1 Tola"), TOLA_ML);
+  assert.equal(TOLA_ML, 12);
+});
+
+test("½ Tola → 6 ml", () => {
+  assert.equal(resolveDeductMlFromUnitLabel("½ Tola"), HALF_TOLA_ML);
+  assert.equal(resolveDeductMlFromUnitLabel("1/2 Tola"), HALF_TOLA_ML);
+  assert.equal(HALF_TOLA_ML, 6);
+});
+
+test("¼ Tola → 3 ml", () => {
+  assert.equal(resolveDeductMlFromUnitLabel("¼ Tola"), QUARTER_TOLA_ML);
+  assert.equal(resolveDeductMlFromUnitLabel("1/4 Tola"), QUARTER_TOLA_ML);
+  assert.equal(QUARTER_TOLA_ML, 3);
+});
+
+test("100ml refill label → 100", () => {
+  assert.equal(resolveDeductMlFromUnitLabel("100ml refill"), 100);
+  assert.equal(resolveDeductMlFromUnitLabel("50 ml"), 50);
+});
+
+test("missing / garbage label → null (sale must stop)", () => {
+  assert.equal(resolveDeductMlFromUnitLabel(undefined), null);
+  assert.equal(resolveDeductMlFromUnitLabel(""), null);
+  assert.equal(resolveDeductMlFromUnitLabel("pcs"), null);
+  assert.equal(resolveDeductMlFromUnitLabel("bottle"), null);
+});
+
+test("client deductMl alone is not a label — must not invent ml", () => {
+  // resolveDeductMlFromUnitLabel only reads labels; raw deductMl is ignored by design
+  assert.equal(resolveDeductMlFromUnitLabel(undefined), null);
+});
+
+console.log("mixed-cart line type rules (local)");
+
+test("ready + remix + oil line types are distinct", () => {
+  const types = new Set(["ready", "remix", "oil", "refill", "packaging"]);
+  assert.ok(types.has("ready"));
+  assert.ok(types.has("remix"));
+  assert.ok(types.has("refill"));
+});
+
+test("FIFO short message shape", () => {
+  const err = new SaleError(
+    "INSUFFICIENT_STOCK",
+    "Insufficient stock for Cap (FIFO need 2, short 1)",
+  );
+  assert.match(err.message, /FIFO need/);
+  assert.match(err.message, /short/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

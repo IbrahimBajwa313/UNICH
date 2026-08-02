@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertTriangle,
   Boxes,
   ClipboardList,
   FileText,
@@ -22,6 +23,7 @@ const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pos", label: "POS Terminal", icon: ShoppingCart },
   { href: "/inventory", label: "Inventory", icon: Boxes },
+  { href: "/inventory/low-stock", label: "Low Stock", icon: AlertTriangle },
   { href: "/formulas", label: "Formulas & BOM", icon: FlaskConical },
   { href: "/purchases", label: "Purchasing", icon: Truck },
   { href: "/customers", label: "Customers", icon: Users },
@@ -84,18 +86,22 @@ export function Sidebar() {
           <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
             Operations
           </p>
-          {nav.slice(0, 7).map((item, i) => (
+          {nav.slice(0, 8).map((item, i) => (
             <NavItem
               key={item.href}
               {...item}
-              active={pathname === item.href}
+              active={
+                item.href === "/inventory"
+                  ? pathname === "/inventory"
+                  : pathname === item.href
+              }
               delay={i}
             />
           ))}
           <p className="mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
             Insights & System
           </p>
-          {nav.slice(7).map((item) => (
+          {nav.slice(8).map((item) => (
             <NavItem
               key={item.href}
               {...item}
@@ -139,18 +145,21 @@ function NavItem({
     <Link
       href={href}
       className={clsx(
-        "animate-slide-in flex items-center gap-2.5 rounded-full px-3 py-2 text-sm transition-all",
+        "animate-slide-in flex items-center gap-2.5 rounded-full px-3 py-2 text-sm whitespace-nowrap transition-all",
         active
           ? "bg-ink font-medium text-canvas shadow-[0_4px_20px_rgb(245_245_247_/_12%)]"
           : "text-ink-muted hover:bg-sidebar-hover hover:text-ink",
       )}
     >
       <Icon
-        className={clsx("h-4 w-4", active ? "text-canvas" : "opacity-75")}
+        className={clsx(
+          "h-4 w-4 shrink-0",
+          active ? "text-canvas" : "opacity-75",
+        )}
       />
-      <span>{label}</span>
+      <span className="whitespace-nowrap">{label}</span>
       {active ? (
-        <span className="ml-auto h-1.5 w-1.5 rounded-full bg-gold" />
+        <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
       ) : null}
     </Link>
   );
