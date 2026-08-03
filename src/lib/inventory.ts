@@ -117,23 +117,96 @@ export async function deductFifoMany(
       };
     };
 
-    // Sequential under a session (txn); parallel otherwise for latency
-    if (session) {
-      for (const need of list) reserved.push(await reserveOne(need));
-    } else {
-      reserved.push(
-        ...(await Promise.all(list.map((need) => reserveOne(need)))),
-      );
-    }
+    /** One round-trip reserve for all products (POS hot path). */
+    const reserveBulk = async (): Promise<Reserved[]> => {
+      const now = new Date();
+      const ops = list.map((need) => ({
+        updateOne: {
+          filter: {
+            _id: new mongoose.Types.ObjectId(need.productId),
+            stockSellable: { $gte: need.qty },
+          },
+          update: {
+            $inc: { stockSellable: -need.qty },
+            $set: { lastSoldAt: now },
+          },
+        },
+      }));
+
+      const rollbackPrefix = async (count: number) => {
+        if (count <= 0) return;
+        await Promise.all(
+          list.slice(0, count).map((need) =>
+            Product.findByIdAndUpdate(
+              need.productId,
+              { $inc: { stockSellable: need.qty } },
+              { writeConcern: FAST_WC },
+            ),
+          ),
+        );
+      };
+
+      try {
+        const result = await Product.bulkWrite(ops, {
+          ordered: true,
+          writeConcern: FAST_WC,
+        });
+        if (result.modifiedCount !== list.length) {
+          await rollbackPrefix(result.modifiedCount);
+          const failed = list[result.modifiedCount];
+          throw new SaleError(
+            "INSUFFICIENT_STOCK",
+            `Insufficient stock for ${failed?.productName || failed?.productId || "item"}`,
+          );
+        }
+      } catch (err) {
+        if (err instanceof SaleError) throw err;
+        const modified =
+          (err as { result?: { modifiedCount?: number; nModified?: number } })
+            ?.result?.modifiedCount ??
+          (err as { result?: { nModified?: number } })?.result?.nModified ??
+          0;
+        await rollbackPrefix(modified);
+        const failed = list[modified] || list[0];
+        throw new SaleError(
+          "INSUFFICIENT_STOCK",
+          `Insufficient stock for ${failed?.productName || failed?.productId || "item"}`,
+        );
+      }
+
+      return list.map((need) => ({
+        productId: need.productId,
+        qty: need.qty,
+        name: need.productName || need.productId,
+      }));
+    };
 
     const productObjectIds = list.map(
       (n) => new mongoose.Types.ObjectId(n.productId),
     );
-    const layers = await FifoLayer.find(
-      { productId: { $in: productObjectIds }, qtyRemaining: { $gt: 0 } },
-      null,
-      { sort: { purchaseDate: 1 }, ...findOpts },
-    );
+
+    // Parallel stock reserve + FIFO layer read (saves ~1 Atlas RTT on POS).
+    // Layer consume still uses qtyRemaining $gte so races fail safely.
+    let layers: Awaited<ReturnType<typeof FifoLayer.find>>;
+    if (session) {
+      for (const need of list) reserved.push(await reserveOne(need));
+      layers = await FifoLayer.find(
+        { productId: { $in: productObjectIds }, qtyRemaining: { $gt: 0 } },
+        null,
+        { sort: { purchaseDate: 1 }, ...findOpts },
+      );
+    } else {
+      const [reservedList, layerDocs] = await Promise.all([
+        reserveBulk(),
+        FifoLayer.find(
+          { productId: { $in: productObjectIds }, qtyRemaining: { $gt: 0 } },
+          null,
+          { sort: { purchaseDate: 1 }, ...findOpts },
+        ),
+      ]);
+      reserved.push(...reservedList);
+      layers = layerDocs;
+    }
 
     const layersByProduct = new Map<string, typeof layers>();
     for (const layer of layers) {
@@ -359,6 +432,7 @@ export async function addFifoLayer(input: {
     qtyRemaining: input.qty,
     unitCost: input.unitCost,
     currency: input.currency,
+    source: "purchase",
   });
 
   const product = await Product.findById(input.productId);
@@ -368,5 +442,46 @@ export async function addFifoLayer(input: {
     await refreshCostFifo(input.productId);
   }
 
+  return layer;
+}
+
+/** Finished goods from a completed production order → new FIFO layer + sellable stock. */
+export async function addProductionFifoLayer(input: {
+  productId: string;
+  supplierId: string;
+  supplierName: string;
+  productionOrderId: string;
+  purchaseDate: Date;
+  qty: number;
+  unitCost: number;
+  currency: string;
+}) {
+  if (!(input.qty > 0)) {
+    throw new SaleError("VALIDATION", "Production output qty must be greater than 0");
+  }
+
+  const layer = await FifoLayer.create({
+    productId: input.productId,
+    supplierId: input.supplierId,
+    supplierName: input.supplierName,
+    purchaseDate: input.purchaseDate,
+    qtyRemaining: input.qty,
+    unitCost: input.unitCost,
+    currency: input.currency,
+    source: "production",
+    productionOrderId: input.productionOrderId,
+  });
+
+  const product = await Product.findByIdAndUpdate(
+    input.productId,
+    { $inc: { stockSellable: input.qty } },
+    { returnDocument: "after", writeConcern: FAST_WC },
+  );
+  if (!product) {
+    await FifoLayer.findByIdAndDelete(layer._id);
+    throw new SaleError("PRODUCT_NOT_FOUND", "Output product not found");
+  }
+
+  await refreshCostFifo(input.productId);
   return layer;
 }

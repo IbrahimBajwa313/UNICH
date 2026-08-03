@@ -409,9 +409,61 @@ function requireProduct(
   return product;
 }
 
+/** In-memory default remix BOM — avoids an Atlas round-trip on every POS remix. */
+let defaultRemixCache: { at: number; doc: FormulaDoc | null } | null = null;
+const DEFAULT_REMIX_CACHE_MS = 60_000;
+
+function peekDefaultRemixFormula(): FormulaDoc | null | undefined {
+  if (
+    defaultRemixCache &&
+    Date.now() - defaultRemixCache.at < DEFAULT_REMIX_CACHE_MS
+  ) {
+    return defaultRemixCache.doc;
+  }
+  return undefined;
+}
+
+async function loadDefaultRemixFormula(): Promise<FormulaDoc | null> {
+  const cached = peekDefaultRemixFormula();
+  if (cached !== undefined) return cached;
+
+  const docs = await Formula.find({ type: "remix", status: "approved" })
+    .select("name type status customerId yieldMl components")
+    .sort({ updatedAt: -1 })
+    .limit(30)
+    .lean<FormulaDoc[]>();
+  const doc =
+    docs.find((f) => f.customerId == null) || docs[0] || null;
+  defaultRemixCache = { at: Date.now(), doc };
+  return doc;
+}
+
+/** Call on POS boot so the first remix checkout skips a formula round-trip. */
+export async function warmSaleCaches() {
+  await loadDefaultRemixFormula();
+}
+
+/** Call when remix formulas are approved/edited so POS picks up the new BOM. */
+export function invalidateDefaultRemixCache() {
+  defaultRemixCache = null;
+}
+
+function collectFormulaProductIds(docs: FormulaDoc[], into: Set<string>) {
+  for (const doc of docs) {
+    for (const c of doc.components || []) {
+      if (
+        c.productId !== OIL_BASE_PRODUCT_ID &&
+        mongoose.isValidObjectId(c.productId)
+      ) {
+        into.add(c.productId);
+      }
+    }
+  }
+}
+
 /**
  * Full pre-sale validation: business rules + deduction plan (no writes).
- * Batches product + formula reads to minimise Atlas round-trips.
+ * Target: 1 Atlas round-trip when default remix formula is warm-cached.
  */
 export async function validateSaleLines(
   rawLines: IncomingSaleLine[],
@@ -441,58 +493,48 @@ export async function validateSaleLines(
     }
   }
 
-  const [defaultRemixFormula, namedFormulas, products] = await Promise.all([
-    needsRemix
-      ? Formula.findOne({
-          type: "remix",
-          status: "approved",
-          $or: [{ customerId: null }, { customerId: { $exists: false } }],
-        }).lean<FormulaDoc>()
-      : Promise.resolve(null),
+  const cachedDefault = needsRemix ? peekDefaultRemixFormula() : null;
+  // When default BOM is cached, include its component ids in the first product read.
+  if (cachedDefault) collectFormulaProductIds([cachedDefault], productIds);
+
+  const lineProductIds = [...productIds];
+  const [namedFormulas, remixFormula, firstProducts] = await Promise.all([
     formulaIds.size > 0
       ? Formula.find({
           _id: { $in: [...formulaIds] },
           status: "approved",
-        }).lean<FormulaDoc[]>()
+        })
+          .select("name type status customerId yieldMl components")
+          .lean<FormulaDoc[]>()
       : Promise.resolve([] as FormulaDoc[]),
-    productIds.size > 0
-      ? Product.find({ _id: { $in: [...productIds] } })
+    needsRemix
+      ? cachedDefault !== undefined
+        ? Promise.resolve(cachedDefault)
+        : loadDefaultRemixFormula()
+      : Promise.resolve(null),
+    lineProductIds.length > 0
+      ? Product.find({ _id: { $in: lineProductIds } })
           .select("name sku unit sellPrice wholesalePrice stockSellable")
           .lean<ProductLean[]>()
       : Promise.resolve([] as ProductLean[]),
   ]);
-
-  // Fallback if no anonymous default exists (legacy DB with only customer formulas).
-  const remixFormula =
-    defaultRemixFormula ||
-    (needsRemix
-      ? await Formula.findOne({ type: "remix", status: "approved" }).lean<FormulaDoc>()
-      : null);
 
   const formulasById = new Map<string, FormulaDoc>(
     namedFormulas.map((f) => [String(f._id), f]),
   );
 
   const productsById = new Map<string, ProductLean>(
-    products.map((p) => [String(p._id), p]),
+    firstProducts.map((p) => [String(p._id), p]),
   );
 
-  // Prefetch BOM component products for every formula used on this sale.
-  const formulaDocs = [
-    ...(remixFormula ? [remixFormula] : []),
-    ...namedFormulas,
-  ];
+  // Fetch any BOM component products not covered by the first read (cold cache / named formulas).
   const missingComponentIds = new Set<string>();
-  for (const doc of formulaDocs) {
-    for (const c of doc.components) {
-      if (
-        c.productId !== OIL_BASE_PRODUCT_ID &&
-        mongoose.isValidObjectId(c.productId) &&
-        !productsById.has(c.productId)
-      ) {
-        missingComponentIds.add(c.productId);
-      }
-    }
+  collectFormulaProductIds(
+    [...(remixFormula ? [remixFormula] : []), ...namedFormulas],
+    missingComponentIds,
+  );
+  for (const id of [...missingComponentIds]) {
+    if (productsById.has(id)) missingComponentIds.delete(id);
   }
   if (missingComponentIds.size > 0) {
     const extra = await Product.find({ _id: { $in: [...missingComponentIds] } })

@@ -1,10 +1,24 @@
 import { NextResponse } from "next/server";
+import {
+  getFormulaAdmin,
+  isFormulaAdminResponse,
+  requireFormulaAdmin,
+} from "@/lib/auth/formulaAdmin";
 import { connectDB } from "@/lib/db";
-import { makeAuditEntry, mapFormula } from "@/lib/formulas/mapFormula";
+import {
+  makeAuditEntry,
+  mapFormula,
+  mapFormulaPublic,
+} from "@/lib/formulas/mapFormula";
 import { validateFormulaInput } from "@/lib/formulas/validateFormula";
 import { Formula } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 
+/**
+ * GET formulas.
+ * - Admin session: full recipes (BLD-04 view).
+ * - Non-admin: customer-scoped list only, components redacted (POS / customers).
+ */
 export async function GET(req: Request) {
   try {
     await connectDB();
@@ -12,8 +26,29 @@ export async function GET(req: Request) {
     const customerId = searchParams.get("customerId");
     const status = searchParams.get("status");
     const q = searchParams.get("q")?.trim() || searchParams.get("search")?.trim();
-    const filter: Record<string, unknown> = {};
+    const admin = getFormulaAdmin(req);
 
+    if (!admin) {
+      // Public/POS/customers path: customer-scoped only, recipe ratios redacted.
+      // Library-wide list / search still requires admin (BLD-04 view).
+      if (!customerId) {
+        return NextResponse.json(
+          {
+            error:
+              "Admin access required to view formulas (BLD-04). Unlock with admin password.",
+          },
+          { status: 403 },
+        );
+      }
+      const publicFilter: Record<string, unknown> = { customerId };
+      if (status) publicFilter.status = status;
+      const formulas = await Formula.find(publicFilter)
+        .sort({ updatedAt: -1 })
+        .lean();
+      return NextResponse.json(toJSONList(formulas).map(mapFormulaPublic));
+    }
+
+    const filter: Record<string, unknown> = {};
     if (customerId) filter.customerId = customerId;
     if (status) filter.status = status;
     if (q) {
@@ -25,7 +60,7 @@ export async function GET(req: Request) {
       ];
     }
 
-    const formulas = await Formula.find(filter).sort({ updatedAt: -1 });
+    const formulas = await Formula.find(filter).sort({ updatedAt: -1 }).lean();
     return NextResponse.json(toJSONList(formulas).map(mapFormula));
   } catch (error) {
     return NextResponse.json(
@@ -37,6 +72,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const admin = requireFormulaAdmin(req);
+    if (isFormulaAdminResponse(admin)) return admin;
+
     await connectDB();
     const body = await req.json();
     const errors = validateFormulaInput({
@@ -49,12 +87,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: errors[0], errors }, { status: 400 });
     }
 
-    const by = (body.savedBy as string) || (body.approvedBy as string) || "Admin";
+    const by = admin.name;
     const formula = await Formula.create({
       ...body,
       status: "draft",
       version: 1,
       versions: [],
+      materialsReservation: { active: false, lines: [] },
       history: [
         makeAuditEntry({
           action: "created",

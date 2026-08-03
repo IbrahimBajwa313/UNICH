@@ -733,7 +733,7 @@ export default function InventoryPage() {
                   <LoadingState label="Loading layers…" />
                 ) : !layers?.length ? (
                   <p className="text-sm text-ink-muted">
-                    No purchase layers recorded for this SKU.
+                    No FIFO layers recorded for this SKU.
                   </p>
                 ) : (
                   <ul className="space-y-2">
@@ -751,6 +751,9 @@ export default function InventoryPage() {
                               <p className="text-sm font-medium">{layer.supplierName}</p>
                               <p className="text-[11px] text-ink-muted">
                                 {layer.purchaseDate} · {layer.currency}
+                                {layer.source === "production"
+                                  ? " · production batch"
+                                  : ""}
                               </p>
                             </div>
                           </div>

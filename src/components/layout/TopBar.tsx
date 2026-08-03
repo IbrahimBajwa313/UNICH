@@ -1,15 +1,45 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { Bell, Wifi } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 
+const PAGE_TITLES: { href: string; label: string }[] = [
+  { href: "/", label: "Dashboard" },
+  { href: "/pos", label: "Sales Counter" },
+  { href: "/inventory/low-stock", label: "Low Stock" },
+  { href: "/inventory", label: "Inventory" },
+  { href: "/formulas", label: "Formulas & BOM" },
+  { href: "/production", label: "Production" },
+  { href: "/purchases", label: "Purchasing" },
+  { href: "/customers", label: "Customers" },
+  { href: "/quotations", label: "Quotations" },
+  { href: "/reports", label: "Reports" },
+  { href: "/expenses", label: "Expenses" },
+  { href: "/playground", label: "Playground" },
+  { href: "/settings", label: "Settings" },
+];
+
+function resolvePageTitle(pathname: string, fallback?: string) {
+  if (fallback) return fallback;
+  const match = [...PAGE_TITLES]
+    .sort((a, b) => b.href.length - a.href.length)
+    .find((t) =>
+      t.href === "/" ? pathname === "/" : pathname.startsWith(t.href),
+    );
+  return match?.label;
+}
+
 export function TopBar({ title }: { title?: string }) {
+  const pathname = usePathname();
+  const pageTitle = resolvePageTitle(pathname, title);
+
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line/70 bg-canvas/80 px-6 backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
-        {title ? (
-          <p className="truncate text-sm font-medium text-ink-muted md:hidden">
-            {title}
+        {pageTitle ? (
+          <p className="truncate text-sm font-semibold tracking-tight text-ink">
+            {pageTitle}
           </p>
         ) : null}
       </div>

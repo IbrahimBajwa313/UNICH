@@ -41,8 +41,9 @@ export async function connectDB() {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 20000,
       family: 4,
-      maxPoolSize: 20,
-      minPoolSize: 2,
+      // Keep sockets warm for POS complete (parallel reserve + layer + insert).
+      maxPoolSize: 24,
+      minPoolSize: 4,
     });
   }
 

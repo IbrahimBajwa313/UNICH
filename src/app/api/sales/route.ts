@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Sale } from "@/lib/models";
 import { createSale } from "@/lib/sales/createSale";
 import { SaleError } from "@/lib/sales/errors";
+import { warmSaleCaches } from "@/lib/sales/validateSale";
 import { toJSON, toJSONList } from "@/lib/serialize";
 
 function mapSale(s: Record<string, unknown>) {
@@ -26,6 +27,10 @@ function mapSale(s: Record<string, unknown>) {
 export async function GET(req: Request) {
   try {
     await connectDB();
+    // Warm formula cache on POS boot (held-bills fetch) — first complete stays fast.
+    void warmSaleCaches().catch(() => {
+      /* non-fatal */
+    });
     const { searchParams } = new URL(req.url);
     const limit = Number(searchParams.get("limit") || 20);
     const status = searchParams.get("status") || "completed";
@@ -65,9 +70,10 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const headerKey = req.headers.get("idempotency-key") || undefined;
-    const { sale, deduplicated } = await createSale({
+    const { sale, deduplicated, timingMs } = await createSale({
       customerPhone: body.customerPhone,
       customerName: body.customerName,
+      customerId: body.customerId,
       salesperson: body.salesperson,
       payment: body.payment,
       lines: body.lines,
@@ -75,10 +81,14 @@ export async function POST(req: Request) {
       idempotencyKey: body.idempotencyKey || headerKey,
     });
 
-    return NextResponse.json(
-      { ...mapSale(toJSON(sale)!), deduplicated },
-      { status: deduplicated ? 200 : 201 },
-    );
+    const payload = { ...mapSale(toJSON(sale)!), deduplicated, timingMs };
+    const res = NextResponse.json(payload, {
+      status: deduplicated ? 200 : 201,
+    });
+    if (timingMs?.total != null) {
+      res.headers.set("Server-Timing", `sale;dur=${timingMs.total}`);
+    }
+    return res;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to create sale";

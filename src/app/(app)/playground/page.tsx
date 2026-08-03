@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   CircleDashed,
   ClipboardList,
+  Factory,
   FileText,
   FlaskConical,
   ShoppingCart,
@@ -44,7 +45,7 @@ const tracks = [
     icon: Boxes,
     points: [
       "Sellable / tester / sample / personal",
-      "FIFO purchase layers",
+      "FIFO purchase + production layers",
       "Low stock thresholds",
       "ml ↔ tola conversions",
       "Excel import/export (staging + undo)",
@@ -65,6 +66,20 @@ const tracks = [
       "Product picker + Oil/Ethanol/Fixative/Label/Box",
       "Units ml/g/kg/pcs + yield validation",
       "Search by name / customer / type",
+    ],
+  },
+  {
+    id: "production",
+    title: "Production Orders",
+    status: "ready" as const,
+    href: "/production",
+    icon: Factory,
+    points: [
+      "Generate order from approved formula",
+      "Preview + consume formula ingredients",
+      "Consume BOM packaging on produce",
+      "FIFO deduction of materials",
+      "Create finished-goods production batch",
     ],
   },
   {

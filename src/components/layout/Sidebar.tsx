@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Boxes,
   ClipboardList,
+  Factory,
   FileText,
   FlaskConical,
   LayoutDashboard,
@@ -21,10 +22,11 @@ import { useApiData } from "@/components/ui/DataState";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pos", label: "POS Terminal", icon: ShoppingCart },
+  { href: "/pos", label: "Sales Counter", icon: ShoppingCart },
   { href: "/inventory", label: "Inventory", icon: Boxes },
   { href: "/inventory/low-stock", label: "Low Stock", icon: AlertTriangle },
   { href: "/formulas", label: "Formulas & BOM", icon: FlaskConical },
+  { href: "/production", label: "Production", icon: Factory },
   { href: "/purchases", label: "Purchasing", icon: Truck },
   { href: "/customers", label: "Customers", icon: Users },
   { href: "/quotations", label: "Quotations", icon: FileText },
@@ -86,7 +88,7 @@ export function Sidebar() {
           <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
             Operations
           </p>
-          {nav.slice(0, 8).map((item, i) => (
+          {nav.slice(0, 9).map((item, i) => (
             <NavItem
               key={item.href}
               {...item}
@@ -101,7 +103,7 @@ export function Sidebar() {
           <p className="mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
             Insights & System
           </p>
-          {nav.slice(8).map((item) => (
+          {nav.slice(9).map((item) => (
             <NavItem
               key={item.href}
               {...item}

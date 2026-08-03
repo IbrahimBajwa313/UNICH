@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
+import {
+  isFormulaAdminResponse,
+  requireFormulaAdmin,
+} from "@/lib/auth/formulaAdmin";
 import { connectDB } from "@/lib/db";
 import { makeAuditEntry, mapFormula } from "@/lib/formulas/mapFormula";
+import {
+  buildMaterialsReservation,
+  clearMaterialsReservation,
+} from "@/lib/formulas/materialsReservation";
 import { validateFormulaInput } from "@/lib/formulas/validateFormula";
 import { Formula } from "@/lib/models";
+import type { FormulaComponent } from "@/lib/types";
 import { toJSON } from "@/lib/serialize";
+import { invalidateDefaultRemixCache } from "@/lib/sales/validateSale";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -43,6 +53,9 @@ function currentVersion(doc: Record<string, unknown>) {
 
 export async function PUT(req: Request, ctx: Ctx) {
   try {
+    const admin = requireFormulaAdmin(req);
+    if (isFormulaAdminResponse(admin)) return admin;
+
     await connectDB();
     const { id } = await ctx.params;
     const body = (await req.json()) as Record<string, unknown>;
@@ -50,12 +63,16 @@ export async function PUT(req: Request, ctx: Ctx) {
     const contentTouched = isContentTouched(body);
     const restoreVersion =
       typeof body.restoreVersion === "number" ? body.restoreVersion : undefined;
-    const savedBy =
-      (body.savedBy as string) || (body.approvedBy as string) || "Admin";
+    // BLD-04: identity comes from admin session, not client body.
+    const savedBy = admin.name;
 
     // Restore a prior revision into the live recipe (creates a new version).
     if (restoreVersion !== undefined) {
-      const current = await Formula.findById(id).lean<Record<string, unknown>>();
+      const current = await Formula.findById(id)
+        .select(
+          "name type status version versions customerId customerName yieldMl components notes",
+        )
+        .lean<Record<string, unknown>>();
       if (!current) {
         return NextResponse.json({ error: "Formula not found" }, { status: 404 });
       }
@@ -97,66 +114,86 @@ export async function PUT(req: Request, ctx: Ctx) {
             customerName: snap.customerName,
             status: "draft",
             version: toVersion,
+            materialsReservation: clearMaterialsReservation(),
           },
           $unset: { approvedAt: "", approvedBy: "" },
         },
-        { returnDocument: "after", runValidators: true },
+        { returnDocument: "after", runValidators: true, lean: true },
       );
       if (!formula) {
         return NextResponse.json({ error: "Formula not found" }, { status: 404 });
       }
+      invalidateDefaultRemixCache();
       return NextResponse.json(mapFormula(toJSON(formula)!));
     }
 
-    // Fast path: status-only (approve / reject / revoke / archive).
+    // Fast path: status-only (approve / reject / revoke / archive) — one lean read + update.
     if (nextStatus && !contentTouched) {
-      const current = await Formula.findById(id).lean<Record<string, unknown>>();
+      const current = await Formula.findById(id)
+        .select("status components version")
+        .lean<Record<string, unknown>>();
       if (!current) {
         return NextResponse.json({ error: "Formula not found" }, { status: 404 });
       }
 
+      // BLD-12: reserve materials only when approved; clear otherwise.
+      const reservation =
+        nextStatus === "approved"
+          ? buildMaterialsReservation(
+              current.components as FormulaComponent[],
+              true,
+            )
+          : clearMaterialsReservation();
+
+      const ver = currentVersion(current);
       const update =
         nextStatus === "approved"
           ? {
               $set: {
                 status: "approved",
                 approvedAt: new Date(),
-                approvedBy: (body.approvedBy as string) || "Admin",
+                approvedBy: savedBy,
+                materialsReservation: reservation,
               },
               $push: {
                 history: makeAuditEntry({
                   action: "status_changed",
                   by: savedBy,
-                  detail: `Status → approved`,
+                  detail: `Status → approved · materials reservation on (${reservation.lines.length} lines)`,
                   fromStatus: current.status as string,
                   toStatus: "approved",
-                  fromVersion: currentVersion(current),
-                  toVersion: currentVersion(current),
+                  fromVersion: ver,
+                  toVersion: ver,
                 }),
               },
             }
           : {
-              $set: { status: nextStatus },
+              $set: {
+                status: nextStatus,
+                materialsReservation: reservation,
+              },
               $unset: { approvedAt: "", approvedBy: "" },
               $push: {
                 history: makeAuditEntry({
                   action: "status_changed",
                   by: savedBy,
-                  detail: `Status → ${nextStatus}`,
+                  detail: `Status → ${nextStatus} · materials reservation off`,
                   fromStatus: current.status as string,
                   toStatus: nextStatus,
-                  fromVersion: currentVersion(current),
-                  toVersion: currentVersion(current),
+                  fromVersion: ver,
+                  toVersion: ver,
                 }),
               },
             };
 
       const formula = await Formula.findByIdAndUpdate(id, update, {
         returnDocument: "after",
+        lean: true,
       });
       if (!formula) {
         return NextResponse.json({ error: "Formula not found" }, { status: 404 });
       }
+      invalidateDefaultRemixCache();
       return NextResponse.json(mapFormula(toJSON(formula)!));
     }
 
@@ -262,16 +299,28 @@ export async function PUT(req: Request, ctx: Ctx) {
       setFields.customerName = body.customerName;
     }
 
+    const reservation =
+      toStatus === "approved"
+        ? buildMaterialsReservation(
+            nextComponents as FormulaComponent[],
+            true,
+          )
+        : clearMaterialsReservation();
+
     const pipeline: Record<string, unknown>[] = [{ $set: setFields }];
     if (toStatus === "approved") {
       pipeline.push({
         $set: {
           approvedAt: now,
-          approvedBy: (body.approvedBy as string) || "Admin",
+          approvedBy: savedBy,
+          materialsReservation: reservation,
         },
       });
     } else {
       pipeline.push({ $unset: ["approvedAt", "approvedBy"] });
+      pipeline.push({
+        $set: { materialsReservation: reservation },
+      });
     }
 
     const formula = await Formula.findOneAndUpdate({ _id: id }, pipeline, {
@@ -281,6 +330,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     if (!formula) {
       return NextResponse.json({ error: "Formula not found" }, { status: 404 });
     }
+    invalidateDefaultRemixCache();
     return NextResponse.json(mapFormula(toJSON(formula)!));
   } catch (error) {
     return NextResponse.json(
@@ -290,14 +340,18 @@ export async function PUT(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    const admin = requireFormulaAdmin(req);
+    if (isFormulaAdminResponse(admin)) return admin;
+
     await connectDB();
     const { id } = await ctx.params;
-    const formula = await Formula.findByIdAndDelete(id);
+    const formula = await Formula.findByIdAndDelete(id).lean();
     if (!formula) {
       return NextResponse.json({ error: "Formula not found" }, { status: 404 });
     }
+    invalidateDefaultRemixCache();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

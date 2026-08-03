@@ -25,7 +25,6 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
 import { api } from "@/lib/api";
@@ -237,7 +236,7 @@ export default function PosPage() {
     HeldSale[]
   >(
     pastOrdersPhone
-      ? `/api/sales?status=completed&phone=${encodeURIComponent(pastOrdersPhone)}&limit=5`
+      ? `/api/sales?status=completed&phone=${encodeURIComponent(pastOrdersPhone)}&limit=3`
       : null,
   );
   const [toast, setToast] = useState<string | null>(null);
@@ -254,6 +253,8 @@ export default function PosPage() {
   const [printAfterComplete, setPrintAfterComplete] = useState(false);
   const [receiptBusy, setReceiptBusy] = useState<string | null>(null);
   const [heldMenuOpen, setHeldMenuOpen] = useState(false);
+  /** Keep collapsed so Previous Orders never push Complete off-screen. */
+  const [customerExtrasOpen, setCustomerExtrasOpen] = useState(false);
   const sendInFlight = useRef(new Set<string>());
   const [packagingPick, setPackagingPick] = useState<
     Partial<Record<PackagingGroup, string>>
@@ -287,6 +288,11 @@ export default function PosPage() {
       setRemixOilId(oilProducts[0].id);
     }
   }, [oilProducts, remixOilId]);
+
+  // New / cleared phone → keep Repeat panel collapsed so Complete stays visible.
+  useEffect(() => {
+    setCustomerExtrasOpen(false);
+  }, [pastOrdersPhone]);
 
   const packagingProducts = useMemo(
     () =>
@@ -505,36 +511,53 @@ export default function PosPage() {
     flash(`Remix added · oil ${oil.name}`);
   }
 
-  /** BLD-08: reuse an approved customer formula on the current order. */
+  /** BLD-08: reuse an approved customer formula on the current order.
+   * BLD-04: POS only gets redacted formulas (reuseHints) — no full recipe. */
   function applyCustomerFormula(formula: Formula) {
     const remix = inventory.find((p) => p.category === "Customized Perfumes");
     if (!remix) {
       return flash("Create a customized perfume product first", 5000, "err");
     }
 
-    const hasOilBase = formula.components.some(
-      (c) => c.productId === OIL_BASE_PRODUCT_ID,
-    );
+    const hints = formula.reuseHints;
     let oilProductId: string | undefined;
     let oilProductName: string | undefined;
 
-    if (hasOilBase) {
-      const oil = oilProducts.find((p) => p.id === remixOilId);
-      if (!oil) {
-        return flash("Oil not selected for this formula", 5000, "err");
+    if (hints) {
+      if (hints.needsOilSelection || !hints.oilProductId) {
+        const oil = oilProducts.find((p) => p.id === remixOilId);
+        if (!oil) {
+          return flash("Oil not selected for this formula", 5000, "err");
+        }
+        oilProductId = oil.id;
+        oilProductName = oil.name;
+      } else {
+        oilProductId = hints.oilProductId;
+        oilProductName = hints.oilProductName;
       }
-      oilProductId = oil.id;
-      oilProductName = oil.name;
     } else {
-      const oilComp = formula.components.find((c) => {
-        if (c.productId === OIL_BASE_PRODUCT_ID) return false;
-        const p = inventory.find((x) => x.id === c.productId);
-        if (!p || p.unit !== "ml") return false;
-        return !matchRemixRole(c.productName, p.sku);
-      });
-      if (oilComp) {
-        oilProductId = oilComp.productId;
-        oilProductName = oilComp.productName;
+      // Admin-unlocked full formula (rare on POS) — same logic as before.
+      const hasOilBase = formula.components.some(
+        (c) => c.productId === OIL_BASE_PRODUCT_ID,
+      );
+      if (hasOilBase) {
+        const oil = oilProducts.find((p) => p.id === remixOilId);
+        if (!oil) {
+          return flash("Oil not selected for this formula", 5000, "err");
+        }
+        oilProductId = oil.id;
+        oilProductName = oil.name;
+      } else {
+        const oilComp = formula.components.find((c) => {
+          if (c.productId === OIL_BASE_PRODUCT_ID) return false;
+          const p = inventory.find((x) => x.id === c.productId);
+          if (!p || p.unit !== "ml") return false;
+          return !matchRemixRole(c.productName, p.sku);
+        });
+        if (oilComp) {
+          oilProductId = oilComp.productId;
+          oilProductName = oilComp.productName;
+        }
       }
     }
 
@@ -786,6 +809,7 @@ export default function PosPage() {
         body: JSON.stringify({
           customerPhone: snapshot.phone,
           customerName: snapshot.customerName || undefined,
+          customerId: snapshot.matchedCustomerId || undefined,
           salesperson: snapshot.salesperson,
           payment: snapshot.payment,
           idempotencyKey,
@@ -981,6 +1005,7 @@ export default function PosPage() {
         body: JSON.stringify({
           customerPhone: snapshot.phone,
           customerName: snapshot.customerName || undefined,
+          customerId: snapshot.matchedCustomerId || undefined,
           salesperson: snapshot.salesperson,
           payment: snapshot.payment,
           status: "held",
@@ -1322,16 +1347,10 @@ export default function PosPage() {
   }
 
   return (
-    <div>
-      <PageHeader
-        title="POS Terminal"
-        description="F2 search · Enter add · F9 complete · phone autofills known customers."
-        className="!mb-3"
-      />
-
+    <div className="xl:flex xl:h-[calc(100vh-3.5rem-2rem)] xl:flex-col xl:overflow-hidden">
       {toast ? (
         <div
-          className={`animate-fade-up mb-4 rounded-lg border px-4 py-2.5 text-sm ${
+          className={`animate-fade-up mb-3 shrink-0 rounded-lg border px-4 py-2.5 text-sm ${
             toastTone === "err"
               ? "border-rose-400/40 bg-rose-500/10 text-rose-200"
               : "border-gold/30 bg-gold/10 text-gold-deep"
@@ -1341,7 +1360,7 @@ export default function PosPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:h-[calc(100vh-7.5rem)] xl:grid-cols-[1.45fr_1fr] xl:items-stretch">
+      <div className="grid gap-5 xl:min-h-0 xl:flex-1 xl:grid-cols-[1.45fr_1fr] xl:items-stretch">
         {/* LEFT: search → big catalog grid → bottom tools */}
         <div className="flex min-h-0 flex-col gap-3">
           <Panel className="shrink-0 !p-4">
@@ -1362,7 +1381,7 @@ export default function PosPage() {
                   addProductSmart(first);
                   setQuery("");
                 }}
-                placeholder="Search name, SKU, category, barcode… · Enter to add"
+                placeholder="Search name, SKU, category, barcode… · F2 · Enter add · F9 complete"
                 className="h-11 w-full rounded-full border border-line bg-mist pr-3 pl-10 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
               />
             </div>
@@ -1391,7 +1410,7 @@ export default function PosPage() {
             padding={false}
             className="flex min-h-[280px] flex-1 flex-col overflow-hidden"
           >
-            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+            <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
               {catalog.length === 0 ? (
                 <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-ink-muted">
                   No products in this filter
@@ -1600,7 +1619,7 @@ export default function PosPage() {
           </Panel>
         </div>
 
-        <Panel className="flex min-h-0 flex-col overflow-hidden !p-4 xl:h-[calc(100vh-7.5rem)] xl:sticky xl:top-[4.5rem]">
+        <Panel className="flex min-h-0 flex-col overflow-hidden !p-4 xl:h-full">
           {/* Fixed header */}
           <div className="shrink-0">
             <div className="flex items-center justify-between gap-2">
@@ -1684,122 +1703,10 @@ export default function PosPage() {
               </label>
             </div>
 
-            {pastOrdersPhone ? (
-              <div className="mt-2 space-y-2">
-                <div className="rounded-lg border border-line/70 bg-mist/40 px-3 py-2">
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <History className="h-3.5 w-3.5 text-gold-deep" />
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-                      Previous orders
-                    </p>
-                    {customerMatch ? (
-                      <Badge tone="success" className="h-4 px-1.5 text-[9px]">
-                        {customerMatch}
-                      </Badge>
-                    ) : null}
-                    {pastOrdersLoading ? (
-                      <span className="text-[10px] text-ink-muted">Loading…</span>
-                    ) : null}
-                  </div>
-                  {!pastOrdersLoading && recentOrders.length === 0 ? (
-                    <p className="text-[11px] text-ink-muted">
-                      No completed orders for this number yet.
-                    </p>
-                  ) : (
-                    <ul className="space-y-1.5">
-                      {recentOrders.map((sale) => {
-                        const remix = (sale.lines || []).find(
-                          (l) => l.lineType === "remix",
-                        );
-                        const summary =
-                          remix?.bomNote ||
-                          remix?.name ||
-                          sale.lines?.[0]?.name ||
-                          sale.saleType ||
-                          "Sale";
-                        return (
-                          <li
-                            key={sale.id}
-                            className="flex items-center justify-between gap-2 rounded-md border border-line/60 bg-canvas/70 px-2 py-1.5"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-medium">
-                                {summary}
-                              </p>
-                              <p className="text-[10px] text-ink-muted">
-                                {sale.time || "—"} · {formatMoney(sale.total)} ·{" "}
-                                {(sale.lines || []).length} items
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="h-7 shrink-0 px-2 text-[11px]"
-                              onClick={() => reusePastOrder(sale)}
-                            >
-                              Reuse
-                            </Button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-
-                {matchedCustomerId ? (
-                  <div className="rounded-lg border border-line/70 bg-mist/40 px-3 py-2">
-                    <div className="mb-1.5 flex items-center gap-1.5">
-                      <FlaskConical className="h-3.5 w-3.5 text-gold-deep" />
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-                        Saved formulas
-                      </p>
-                      {formulasLoading ? (
-                        <span className="text-[10px] text-ink-muted">
-                          Loading…
-                        </span>
-                      ) : null}
-                    </div>
-                    {!formulasLoading && savedFormulas.length === 0 ? (
-                      <p className="text-[11px] text-ink-muted">
-                        No approved formulas for this customer.
-                      </p>
-                    ) : (
-                      <ul className="space-y-1.5">
-                        {savedFormulas.map((f) => (
-                          <li
-                            key={f.id}
-                            className="flex items-center justify-between gap-2 rounded-md border border-line/60 bg-canvas/70 px-2 py-1.5"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-medium">
-                                {f.name}
-                              </p>
-                              <p className="text-[10px] text-ink-muted">
-                                {f.components.length} components · {f.yieldMl} ml
-                                · v{f.version || 1}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="h-7 shrink-0 px-2 text-[11px]"
-                              onClick={() => applyCustomerFormula(f)}
-                            >
-                              Reuse
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
             {oilProducts.length > 0 ? (
               <label className="mt-2 block">
                 <span className="text-[11px] font-medium text-ink-muted">
-                  Remix oil (for standard remix / oil-base formulas)
+                  Remix oil
                 </span>
                 <select
                   value={remixOilId}
@@ -1814,10 +1721,130 @@ export default function PosPage() {
                 </select>
               </label>
             ) : null}
+
+            {pastOrdersPhone ? (
+              <div className="mt-2 rounded-lg border border-line/70 bg-mist/40">
+                <button
+                  type="button"
+                  onClick={() => setCustomerExtrasOpen((o) => !o)}
+                  className="flex w-full items-center gap-1.5 px-3 py-2 text-left"
+                >
+                  <History className="h-3.5 w-3.5 shrink-0 text-gold-deep" />
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                    Repeat
+                    {!pastOrdersLoading && recentOrders.length > 0
+                      ? ` · ${recentOrders.length} orders`
+                      : ""}
+                    {matchedCustomerId && savedFormulas.length > 0
+                      ? ` · ${savedFormulas.length} formulas`
+                      : ""}
+                  </span>
+                  {pastOrdersLoading || formulasLoading ? (
+                    <span className="text-[10px] text-ink-muted">…</span>
+                  ) : null}
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 shrink-0 text-ink-muted transition ${
+                      customerExtrasOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+                {customerExtrasOpen ? (
+                  <div className="max-h-36 space-y-2 overflow-y-auto border-t border-line/60 px-3 py-2">
+                    <div>
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                        Previous orders
+                      </p>
+                      {!pastOrdersLoading && recentOrders.length === 0 ? (
+                        <p className="text-[11px] text-ink-muted">
+                          No completed orders yet.
+                        </p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {recentOrders.map((sale) => {
+                            const remix = (sale.lines || []).find(
+                              (l) => l.lineType === "remix",
+                            );
+                            const summary =
+                              remix?.bomNote ||
+                              remix?.name ||
+                              sale.lines?.[0]?.name ||
+                              sale.saleType ||
+                              "Sale";
+                            return (
+                              <li
+                                key={sale.id}
+                                className="flex items-center justify-between gap-2 rounded-md border border-line/60 bg-canvas/70 px-2 py-1"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-medium">
+                                    {summary}
+                                  </p>
+                                  <p className="text-[10px] text-ink-muted">
+                                    {sale.time || "—"} ·{" "}
+                                    {formatMoney(sale.total)}
+                                  </p>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-7 shrink-0 px-2 text-[11px]"
+                                  onClick={() => reusePastOrder(sale)}
+                                >
+                                  Reuse
+                                </Button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    {matchedCustomerId ? (
+                      <div>
+                        <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                          <FlaskConical className="h-3 w-3" />
+                          Saved formulas
+                        </p>
+                        {!formulasLoading && savedFormulas.length === 0 ? (
+                          <p className="text-[11px] text-ink-muted">
+                            No approved formulas.
+                          </p>
+                        ) : (
+                          <ul className="space-y-1">
+                            {savedFormulas.map((f) => (
+                              <li
+                                key={f.id}
+                                className="flex items-center justify-between gap-2 rounded-md border border-line/60 bg-canvas/70 px-2 py-1"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-medium">
+                                    {f.name}
+                                  </p>
+                                  <p className="text-[10px] text-ink-muted">
+                                    v{f.version || 1} · {f.yieldMl} ml
+                                  </p>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-7 shrink-0 px-2 text-[11px]"
+                                  onClick={() => applyCustomerFormula(f)}
+                                >
+                                  Reuse
+                                </Button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
-          {/* Only cart / held scrolls */}
-          <div className="scrollbar-thin mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
+          {/* Only cart scrolls — Complete footer stays pinned */}
+          <div className="scrollbar-hidden mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
             {cart.length === 0 ? (
               <div className="rounded-lg border border-dashed border-line bg-mist/40 px-3 py-8 text-center text-sm text-ink-muted">
                 Cart is empty — add products or remix

@@ -16,6 +16,10 @@ export async function GET(req: Request) {
         ...l,
         productId: String(l.productId),
         supplierId: String(l.supplierId),
+        productionOrderId: l.productionOrderId
+          ? String(l.productionOrderId)
+          : undefined,
+        source: (l.source as string) || "purchase",
         purchaseDate:
           l.purchaseDate instanceof Date
             ? l.purchaseDate.toISOString().slice(0, 10)

@@ -106,6 +106,8 @@ export interface FifoLayer {
   qtyRemaining: number;
   unitCost: number;
   currency: string;
+  source?: "purchase" | "production";
+  productionOrderId?: string;
 }
 
 export interface Customer {
@@ -176,6 +178,25 @@ export interface FormulaVersion {
   savedBy?: string;
 }
 
+/** POS/customer-safe hint when recipe components are redacted (BLD-04). */
+export interface FormulaReuseHints {
+  needsOilSelection: boolean;
+  oilProductId?: string;
+  oilProductName?: string;
+}
+
+/** BLD-12: raw-material reservation tied to approval status. */
+export interface MaterialsReservation {
+  active: boolean;
+  reservedAt?: string;
+  lines: Array<{
+    productId: string;
+    productName: string;
+    qty: number;
+    unit: StockUnit | string;
+  }>;
+}
+
 export interface Formula {
   id: string;
   name: string;
@@ -194,7 +215,12 @@ export interface Formula {
   notes?: string;
   approvedAt?: string;
   approvedBy?: string;
+  /** BLD-12: active only when status === approved. */
+  materialsReservation?: MaterialsReservation;
   updatedAt: string;
+  /** True when API stripped recipe secrecy fields for non-admin. */
+  recipeHidden?: boolean;
+  reuseHints?: FormulaReuseHints;
 }
 
 export interface PurchaseOrderLine {
@@ -219,6 +245,72 @@ export interface PurchaseOrder {
   itemCount: number;
   lines: PurchaseOrderLine[];
   notes?: string;
+}
+
+export type ProductionOrderStatus = "draft" | "completed" | "cancelled";
+
+export interface ProductionPlannedLine {
+  productId: string;
+  productName: string;
+  qty: number;
+  unit: StockUnit | string;
+  reason: string;
+}
+
+export interface ProductionConsumptionLine {
+  productId: string;
+  productName: string;
+  qty: number;
+  reason: string;
+  costTotal: number;
+  batches: Array<{
+    layerId: string;
+    qty: number;
+    unitCost: number;
+    purchaseDate: string;
+  }>;
+}
+
+export interface ProductionBatch {
+  batchNumber: string;
+  producedAt: string;
+  outputProductId: string;
+  outputProductName: string;
+  outputSku: string;
+  outputQty: number;
+  outputUnit: StockUnit | string;
+  unitCost: number;
+  totalMaterialCost: number;
+  fifoLayerId?: string;
+}
+
+export interface ProductionOrder {
+  id: string;
+  orderNumber: string;
+  formulaId: string;
+  formulaName: string;
+  formulaType: FormulaType;
+  formulaVersion: number;
+  qty: number;
+  yieldMl: number;
+  status: ProductionOrderStatus;
+  oilProductId?: string;
+  oilProductName?: string;
+  outputProductId: string;
+  outputProductName: string;
+  outputSku: string;
+  outputUnit: StockUnit | string;
+  outputQty: number;
+  plannedLines: ProductionPlannedLine[];
+  consumption: ProductionConsumptionLine[];
+  batch?: ProductionBatch | null;
+  notes?: string;
+  createdBy?: string;
+  completedAt?: string;
+  completedBy?: string;
+  cancelledAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Quotation {

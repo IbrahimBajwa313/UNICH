@@ -22,7 +22,10 @@ export function useApiData<T>(url: string | null) {
         setError(null);
       }
       try {
-        const res = await fetch(url, { cache: "no-store" });
+        const res = await fetch(url, {
+          cache: "no-store",
+          credentials: "include",
+        });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load");
         setData(json as T);

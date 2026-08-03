@@ -5,9 +5,11 @@ import {
   Archive,
   Check,
   Eye,
+  FileDown,
   History,
   Lock,
   Plus,
+  Printer,
   RotateCcw,
   Search,
   Shield,
@@ -21,6 +23,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { api } from "@/lib/api";
 import { formatQty } from "@/lib/format";
+import { printHtmlDocument } from "@/lib/receipt/print";
+import { buildRecipeHtml } from "@/lib/formulas/recipeDocument";
 import {
   sumLiquidMl,
   validateFormulaInput,
@@ -65,9 +69,20 @@ const oilBaseComponent = (qty = REMIX_OIL_ML): FormulaComponent => ({
 export default function FormulasPage() {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const formulasUrl = query
-    ? `/api/formulas?q=${encodeURIComponent(query)}`
-    : "/api/formulas";
+  const [unlocked, setUnlocked] = useState(false);
+  const [adminName, setAdminName] = useState("Admin");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [authChecking, setAuthChecking] = useState(true);
+  const [password, setPassword] = useState("");
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
+
+  // BLD-04: only fetch full recipes after admin session is active.
+  const formulasUrl = unlocked
+    ? query
+      ? `/api/formulas?q=${encodeURIComponent(query)}`
+      : "/api/formulas"
+    : null;
   const {
     data: formulas,
     loading,
@@ -75,9 +90,10 @@ export default function FormulasPage() {
     reload,
     setData: setFormulas,
   } = useApiData<Formula[]>(formulasUrl);
-  const { data: products } = useApiData<Product[]>("/api/products");
+  const { data: products } = useApiData<Product[]>(
+    unlocked ? "/api/products" : null,
+  );
   const [selectedId, setSelectedId] = useState("");
-  const [unlocked, setUnlocked] = useState(false);
   const [draft, setDraft] = useState<Partial<Formula> | null>(null);
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -87,9 +103,88 @@ export default function FormulasPage() {
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/formula-admin", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const json = (await res.json()) as {
+          unlocked?: boolean;
+          name?: string;
+          email?: string;
+        };
+        if (cancelled) return;
+        if (json.unlocked) {
+          setUnlocked(true);
+          if (json.name) setAdminName(json.name);
+          if (json.email) setAdminEmail(json.email);
+        }
+      } catch {
+        /* stay locked */
+      } finally {
+        if (!cancelled) setAuthChecking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const t = window.setTimeout(() => setQuery(search.trim()), 250);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  async function unlockAdmin() {
+    if (unlocking) return;
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      const res = await fetch("/api/auth/formula-admin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: adminEmail.trim(),
+          password,
+          name: adminName.trim() || adminEmail.trim() || "Admin",
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        name?: string;
+        email?: string;
+      };
+      if (!res.ok) {
+        throw new Error(json.error || "Invalid admin email or password");
+      }
+      setPassword("");
+      setUnlocked(true);
+      if (json.name) setAdminName(json.name);
+      if (json.email) setAdminEmail(json.email);
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : "Unlock failed");
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
+  async function lockAdmin() {
+    setUnlocked(false);
+    setFormulas(null);
+    setSelectedId("");
+    setDraft(null);
+    try {
+      await fetch("/api/auth/formula-admin", {
+        method: "DELETE",
+        credentials: "include",
+      });
+    } catch {
+      /* cookie clear best-effort */
+    }
+  }
 
   const productList = products ?? [];
   const ethanolProduct = useMemo(
@@ -123,10 +218,11 @@ export default function FormulasPage() {
   function openDraft(next: Partial<Formula>) {
     setSaveError(null);
     setDraft(next);
-    window.setTimeout(() => {
+    // Defer scroll/focus so the draft panel paints first (feels instant).
+    requestAnimationFrame(() => {
       draftPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       nameInputRef.current?.focus();
-    }, 50);
+    });
   }
 
   function duplicateFormula() {
@@ -248,7 +344,6 @@ export default function FormulasPage() {
       customerId: draft.customerId,
       customerName: draft.customerName,
       status: "draft" as const,
-      savedBy: "Admin",
     };
 
     // Optimistic close — editor dismisses immediately; server sync in background.
@@ -314,21 +409,27 @@ export default function FormulasPage() {
   }
 
   async function removeFormula() {
-    if (!selected || busy) return;
+    if (!selected) return;
+    const previous = selected;
     const id = selected.id;
-    setBusy(true);
+    const snapshot = formulas ?? [];
+    // Optimistic — UI updates instantly; Atlas sync in background.
+    setSaveError(null);
+    setFormulas((prev) => (prev ?? []).filter((f) => f.id !== id));
+    setSelectedId("");
     try {
       await api(`/api/formulas/${id}`, { method: "DELETE" });
-      setFormulas((prev) => (prev ?? []).filter((f) => f.id !== id));
-      setSelectedId("");
-    } finally {
-      setBusy(false);
+    } catch (err) {
+      setFormulas(snapshot);
+      setSelectedId(previous.id);
+      setSaveError(err instanceof Error ? err.message : "Delete failed");
     }
   }
 
   async function setStatus(status: FormulaStatus) {
-    if (!selected || busy) return;
+    if (!selected) return;
     const previous = selected;
+    const now = new Date().toISOString().replace("T", " ").slice(0, 16);
     const optimistic: Formula = {
       ...selected,
       status,
@@ -336,48 +437,96 @@ export default function FormulasPage() {
         status === "approved"
           ? new Date().toISOString().slice(0, 10)
           : undefined,
-      approvedBy: status === "approved" ? "Admin" : undefined,
+      approvedBy: status === "approved" ? adminName : undefined,
+      history: [
+        ...(selected.history || []),
+        {
+          at: now,
+          by: adminName,
+          action: "status_changed",
+          detail: `Status → ${status}`,
+          fromStatus: selected.status,
+          toStatus: status,
+          fromVersion: selected.version || 1,
+          toVersion: selected.version || 1,
+        },
+      ],
     };
+    setSaveError(null);
     setFormulas((prev) =>
       (prev ?? []).map((f) => (f.id === optimistic.id ? optimistic : f)),
     );
-    setBusy(true);
     try {
       const updated = await api<Formula>(`/api/formulas/${selected.id}`, {
         method: "PUT",
-        body: JSON.stringify({
-          status,
-          approvedBy: status === "approved" ? "Admin" : undefined,
-          savedBy: "Admin",
-        }),
+        body: JSON.stringify({ status }),
       });
       setFormulas((prev) =>
         (prev ?? []).map((f) => (f.id === updated.id ? updated : f)),
       );
-    } catch {
+    } catch (err) {
       setFormulas((prev) =>
         (prev ?? []).map((f) => (f.id === previous.id ? previous : f)),
       );
-    } finally {
-      setBusy(false);
+      setSaveError(
+        err instanceof Error ? err.message : "Failed to update status",
+      );
     }
   }
 
   async function restoreVersion(version: number) {
     if (!selected || busy) return;
     setBusy(true);
+    setSaveError(null);
     try {
       const updated = await api<Formula>(`/api/formulas/${selected.id}`, {
         method: "PUT",
-        body: JSON.stringify({ restoreVersion: version, savedBy: "Admin" }),
+        body: JSON.stringify({ restoreVersion: version }),
       });
       setFormulas((prev) =>
         (prev ?? []).map((f) => (f.id === updated.id ? updated : f)),
       );
       setShowHistory(true);
       setShowAudit(true);
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Failed to restore version",
+      );
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** BLD-04 print — build from in-memory recipe (no Atlas round-trip). */
+  function printRecipe() {
+    if (!selected) return;
+    setSaveError(null);
+    void printHtmlDocument(buildRecipeHtml(selected)).catch((err) => {
+      setSaveError(err instanceof Error ? err.message : "Print failed");
+    });
+  }
+
+  /** BLD-04 export — download HTML + print dialog (Save as PDF). */
+  function exportRecipe() {
+    if (!selected) return;
+    setSaveError(null);
+    try {
+      const html = buildRecipeHtml(selected);
+      const safeName = (selected.name || "formula")
+        .replace(/[^\w\-]+/g, "_")
+        .slice(0, 60);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      void printHtmlDocument(html).catch((err) => {
+        setSaveError(err instanceof Error ? err.message : "Export failed");
+      });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Export failed");
     }
   }
 
@@ -388,8 +537,12 @@ export default function FormulasPage() {
     setDraft({ ...draft, components });
   }
 
-  if (loading && !formulas) return <LoadingState label="Loading formulas…" />;
-  if (error || !formulas) {
+  if (authChecking) return <LoadingState label="Checking admin access…" />;
+
+  if (unlocked && loading && !formulas) {
+    return <LoadingState label="Loading formulas…" />;
+  }
+  if (unlocked && (error || !formulas)) {
     return (
       <ErrorState
         message={error || "Failed to load formulas"}
@@ -412,15 +565,10 @@ export default function FormulasPage() {
               ) : null}
               <Badge tone="success">
                 <Eye className="h-3 w-3" />
-                Formula access granted
+                {adminName} · access granted
               </Badge>
             </div>
-          ) : (
-            <Button variant="gold" size="sm" onClick={() => setUnlocked(true)}>
-              <Shield className="h-4 w-4" />
-              Admin Unlock
-            </Button>
-          )
+          ) : null
         }
       />
 
@@ -433,10 +581,50 @@ export default function FormulasPage() {
           <p className="mt-2 text-sm text-ink-muted">
             Only Admin can view, create, edit, approve, print, or export perfume
             formulas. Sales staff can sell remix without seeing component ratios.
+            Server enforces this — UI unlock alone is not enough.
           </p>
-          <Button className="mt-6" variant="gold" onClick={() => setUnlocked(true)}>
-            Simulate Admin Password
-          </Button>
+          <div className="mx-auto mt-6 max-w-xs space-y-3 text-left">
+            <label className="block text-xs font-medium text-ink-muted">
+              Admin email
+              <input
+                type="email"
+                className="mt-1 w-full rounded-[var(--radius)] border border-line bg-white px-3 py-2 text-sm"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                placeholder="admin@example.com"
+                autoComplete="username"
+              />
+            </label>
+            <label className="block text-xs font-medium text-ink-muted">
+              Admin password
+              <input
+                type="password"
+                className="mt-1 w-full rounded-[var(--radius)] border border-line bg-white px-3 py-2 text-sm"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void unlockAdmin();
+                }}
+                autoComplete="current-password"
+              />
+            </label>
+            {unlockError ? (
+              <p className="text-xs text-coral">{unlockError}</p>
+            ) : (
+              <p className="text-[11px] text-ink-muted">
+                Credentials from .env — ADMIN_EMAIL + ADMIN_PASSWORD
+              </p>
+            )}
+            <Button
+              className="w-full"
+              variant="gold"
+              disabled={unlocking || !password || !adminEmail.trim()}
+              onClick={() => void unlockAdmin()}
+            >
+              <Shield className="h-4 w-4" />
+              {unlocking ? "Unlocking…" : "Admin Unlock"}
+            </Button>
+          </div>
         </Panel>
       ) : (
         <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
@@ -454,12 +642,12 @@ export default function FormulasPage() {
               </label>
             </div>
             <ul className="p-2">
-              {formulas.length === 0 ? (
+              {(formulas ?? []).length === 0 ? (
                 <li className="px-3 py-6 text-center text-xs text-ink-muted">
                   {query ? `No formulas match “${query}”.` : "No formulas yet."}
                 </li>
               ) : (
-                formulas.map((f) => (
+                (formulas ?? []).map((f) => (
                   <li key={f.id}>
                     <button
                       type="button"
@@ -533,7 +721,21 @@ export default function FormulasPage() {
               {selected.status !== "approved" && selected.status !== "archived" ? (
                 <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
                   This recipe is <strong>{selected.status}</strong>. Admin must approve
-                  before it is used for production or remix sales.
+                  before it is used for production or remix sales. Materials reservation
+                  stays off until approved (BLD-12).
+                </div>
+              ) : null}
+
+              {selected.status === "approved" &&
+              selected.materialsReservation?.active ? (
+                <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-ink">
+                  Materials reservation <strong>active</strong> (BLD-12) ·{" "}
+                  {selected.materialsReservation.lines.length} component line
+                  {selected.materialsReservation.lines.length === 1 ? "" : "s"}
+                  {selected.materialsReservation.reservedAt
+                    ? ` · since ${selected.materialsReservation.reservedAt}`
+                    : ""}
+                  . Reject/archive clears reservation.
                 </div>
               ) : null}
 
@@ -690,12 +892,17 @@ export default function FormulasPage() {
                 </div>
               ) : null}
 
+              {saveError && !draft ? (
+                <div className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                  {saveError}
+                </div>
+              ) : null}
+
               <div className="mt-5 flex flex-wrap gap-2">
                 {selected.status !== "approved" && selected.status !== "archived" ? (
                   <Button
                     size="sm"
                     variant="gold"
-                    disabled={busy}
                     onClick={() => void setStatus("approved")}
                   >
                     <Check className="h-3.5 w-3.5" />
@@ -706,7 +913,6 @@ export default function FormulasPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={busy}
                     onClick={() => void setStatus("rejected")}
                   >
                     <X className="h-3.5 w-3.5" />
@@ -717,7 +923,6 @@ export default function FormulasPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={busy}
                     onClick={() => void setStatus("draft")}
                   >
                     Revoke Approval
@@ -727,7 +932,6 @@ export default function FormulasPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={busy}
                     onClick={() => void setStatus("draft")}
                   >
                     Back to Draft
@@ -737,7 +941,6 @@ export default function FormulasPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={busy}
                     onClick={() => void setStatus("archived")}
                   >
                     <Archive className="h-3.5 w-3.5" />
@@ -747,7 +950,6 @@ export default function FormulasPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={busy}
                     onClick={() => void setStatus("draft")}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
@@ -783,18 +985,28 @@ export default function FormulasPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
                   onClick={() => void removeFormula()}
                 >
                   <Trash2 className="h-3.5 w-3.5" /> Delete
                 </Button>
-                <Button size="sm" variant="secondary">
-                  Export PDF
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => printRecipe()}
+                >
+                  <Printer className="h-3.5 w-3.5" /> Print
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => exportRecipe()}
+                >
+                  <FileDown className="h-3.5 w-3.5" /> Export PDF
                 </Button>
                 <Button size="sm" variant="secondary" onClick={duplicateFormula}>
                   Duplicate
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setUnlocked(false)}>
+                <Button size="sm" variant="ghost" onClick={() => void lockAdmin()}>
                   Lock Again
                 </Button>
               </div>

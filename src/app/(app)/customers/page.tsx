@@ -188,8 +188,9 @@ export default function CustomersPage() {
                       </Badge>
                     </div>
                     <p className="text-[11px] text-ink-muted">
-                      {f.components.length} components · {f.yieldMl} ml · v
-                      {f.version || 1}
+                      {f.recipeHidden
+                        ? `${f.yieldMl} ml · v${f.version || 1} · recipe hidden`
+                        : `${f.components.length} components · ${f.yieldMl} ml · v${f.version || 1}`}
                     </p>
                   </li>
                 ))}

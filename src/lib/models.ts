@@ -44,6 +44,17 @@ const FifoLayerSchema = new Schema(
     qtyRemaining: { type: Number, required: true },
     unitCost: { type: Number, required: true },
     currency: { type: String, required: true, default: "AED" },
+    /** purchase = goods receipt; production = finished goods from a production order */
+    source: {
+      type: String,
+      enum: ["purchase", "production"],
+      default: "purchase",
+    },
+    productionOrderId: {
+      type: Schema.Types.ObjectId,
+      ref: "ProductionOrder",
+      default: null,
+    },
   },
   { timestamps: true },
 );
@@ -126,6 +137,22 @@ const FormulaVersionSchema = new Schema(
   { _id: false },
 );
 
+const MaterialsReservationSchema = new Schema(
+  {
+    active: { type: Boolean, default: false },
+    reservedAt: Date,
+    lines: [
+      {
+        productId: { type: String, required: true },
+        productName: { type: String, required: true },
+        qty: { type: Number, required: true, min: 0 },
+        unit: { type: String, default: "ml" },
+      },
+    ],
+  },
+  { _id: false },
+);
+
 const FormulaSchema = new Schema(
   {
     name: { type: String, required: true },
@@ -145,9 +172,18 @@ const FormulaSchema = new Schema(
     notes: String,
     approvedAt: Date,
     approvedBy: String,
+    /** BLD-12: auto material reservation — active only when approved. */
+    materialsReservation: {
+      type: MaterialsReservationSchema,
+      default: () => ({ active: false, lines: [] }),
+    },
   },
   { timestamps: true },
 );
+FormulaSchema.index({ updatedAt: -1 });
+FormulaSchema.index({ status: 1, updatedAt: -1 });
+FormulaSchema.index({ customerId: 1, status: 1 });
+FormulaSchema.index({ type: 1, status: 1 });
 
 const PurchaseOrderLineSchema = new Schema(
   {
@@ -423,6 +459,105 @@ const ImportBatchSchema = new Schema(
   { timestamps: true },
 );
 
+const ProductionConsumeBatchSchema = new Schema(
+  {
+    layerId: { type: Schema.Types.ObjectId, ref: "FifoLayer", required: true },
+    qty: { type: Number, required: true },
+    unitCost: { type: Number, required: true },
+    purchaseDate: { type: Date, required: true },
+  },
+  { _id: false },
+);
+
+const ProductionPlannedLineSchema = new Schema(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    productName: { type: String, required: true },
+    qty: { type: Number, required: true, min: 0 },
+    unit: { type: String, default: "ml" },
+    reason: { type: String, required: true },
+  },
+  { _id: false },
+);
+
+const ProductionConsumptionSchema = new Schema(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    productName: { type: String, required: true },
+    qty: { type: Number, required: true },
+    reason: { type: String, required: true },
+    costTotal: { type: Number, required: true, default: 0 },
+    batches: [ProductionConsumeBatchSchema],
+  },
+  { _id: false },
+);
+
+const ProductionBatchSchema = new Schema(
+  {
+    batchNumber: { type: String, required: true },
+    producedAt: { type: Date, required: true },
+    outputProductId: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+    },
+    outputProductName: { type: String, required: true },
+    outputSku: { type: String, default: "" },
+    outputQty: { type: Number, required: true, min: 0 },
+    outputUnit: { type: String, required: true },
+    unitCost: { type: Number, required: true, default: 0 },
+    totalMaterialCost: { type: Number, required: true, default: 0 },
+    fifoLayerId: { type: Schema.Types.ObjectId, ref: "FifoLayer" },
+  },
+  { _id: false },
+);
+
+const ProductionOrderSchema = new Schema(
+  {
+    orderNumber: { type: String, required: true, unique: true, index: true },
+    formulaId: { type: Schema.Types.ObjectId, ref: "Formula", required: true },
+    formulaName: { type: String, required: true },
+    formulaType: {
+      type: String,
+      enum: ["remix", "oil", "bakhoor"],
+      required: true,
+    },
+    formulaVersion: { type: Number, required: true, default: 1 },
+    /** Number of formula runs (e.g. bottles to produce). */
+    qty: { type: Number, required: true, min: 1 },
+    yieldMl: { type: Number, required: true, default: 0 },
+    status: {
+      type: String,
+      enum: ["draft", "completed", "cancelled"],
+      default: "draft",
+      index: true,
+    },
+    oilProductId: { type: Schema.Types.ObjectId, ref: "Product" },
+    oilProductName: String,
+    outputProductId: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+    },
+    outputProductName: { type: String, required: true },
+    outputSku: { type: String, default: "" },
+    outputUnit: { type: String, required: true },
+    /** Finished goods qty to add on complete. */
+    outputQty: { type: Number, required: true, min: 0 },
+    plannedLines: { type: [ProductionPlannedLineSchema], default: [] },
+    consumption: { type: [ProductionConsumptionSchema], default: [] },
+    batch: { type: ProductionBatchSchema, default: null },
+    notes: String,
+    createdBy: String,
+    completedAt: Date,
+    completedBy: String,
+    cancelledAt: Date,
+  },
+  { timestamps: true },
+);
+ProductionOrderSchema.index({ createdAt: -1 });
+ProductionOrderSchema.index({ status: 1, createdAt: -1 });
+
 export const Product = models.Product || model("Product", ProductSchema);
 export const FifoLayer = models.FifoLayer || model("FifoLayer", FifoLayerSchema);
 export const Customer = models.Customer || model("Customer", CustomerSchema);
@@ -439,3 +574,5 @@ export const AppSettings =
   models.AppSettings || model("AppSettings", AppSettingsSchema);
 export const ImportBatch =
   models.ImportBatch || model("ImportBatch", ImportBatchSchema);
+export const ProductionOrder =
+  models.ProductionOrder || model("ProductionOrder", ProductionOrderSchema);

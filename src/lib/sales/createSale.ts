@@ -31,6 +31,8 @@ export type DeductionAuditEntry = {
 export type CreateSaleInput = {
   customerPhone: string;
   customerName?: string;
+  /** Known CRM id from POS phone match — skips customer upsert round-trip wait. */
+  customerId?: string;
   salesperson?: string;
   payment: string;
   lines: IncomingSaleLine[];
@@ -165,6 +167,66 @@ function resolveSaleType(lines: ValidatedSaleLine[]) {
   return "Retail";
 }
 
+function normalizePayment(value: string): string {
+  const raw = (value || "cash").toLowerCase();
+  if (
+    raw === "cash" ||
+    raw === "card" ||
+    raw === "bank" ||
+    raw === "credit" ||
+    raw === "mixed"
+  ) {
+    return raw;
+  }
+  return "cash";
+}
+
+function asObjectId(id?: string) {
+  if (id && mongoose.isValidObjectId(id)) {
+    return new mongoose.Types.ObjectId(id);
+  }
+  return undefined;
+}
+
+/** Native insert needs ObjectIds — mongoose casting is skipped. */
+function linesForInsert(lines: ValidatedSaleLine[]) {
+  return lines.map((l) => ({
+    productId: asObjectId(l.productId),
+    name: l.name,
+    qty: l.qty,
+    unitLabel: l.unitLabel,
+    unitPrice: l.unitPrice,
+    lineType: l.lineType,
+    bomNote: l.bomNote,
+    deductMl: l.deductMl,
+    oilProductId: asObjectId(l.oilProductId),
+    oilMl: l.oilMl,
+    formulaId: asObjectId(l.formulaId),
+    packagingProductIds: Array.isArray(l.packagingProductIds)
+      ? l.packagingProductIds
+          .filter((id) => mongoose.isValidObjectId(id))
+          .map((id) => new mongoose.Types.ObjectId(id))
+      : [],
+  }));
+}
+
+function auditForInsert(audit: DeductionAuditEntry[]) {
+  return audit.map((a) => ({
+    productId: new mongoose.Types.ObjectId(a.productId),
+    productName: a.productName,
+    qty: a.qty,
+    reason: a.reason,
+    lineIndex: a.lineIndex,
+    costTotal: a.costTotal,
+    batches: a.batches.map((b) => ({
+      layerId: new mongoose.Types.ObjectId(b.layerId),
+      qty: b.qty,
+      unitCost: b.unitCost,
+      purchaseDate: b.purchaseDate,
+    })),
+  }));
+}
+
 const HELD_LINE_TYPES = new Set([
   "ready",
   "remix",
@@ -221,49 +283,80 @@ async function holdSale(input: CreateSaleInput) {
   }
 
   const givenName = input.customerName?.trim();
-  const customer = await Customer.findOneAndUpdate(
-    { phone },
-    {
-      $setOnInsert: {
-        phone,
-        preferences: [],
-        ...(givenName ? {} : { name: "Walk-in Customer" }),
-      },
-      ...(givenName ? { $set: { name: givenName } } : {}),
-    },
-    {
-      upsert: true,
-      returnDocument: "after",
-      setDefaultsOnInsert: true,
-      writeConcern: FAST_WC,
-    },
-  );
+  const knownId =
+    input.customerId && mongoose.isValidObjectId(input.customerId)
+      ? input.customerId
+      : null;
 
-  if (!customer) {
-    throw new SaleError("VALIDATION", "Could not resolve customer for hold");
+  let customerId: mongoose.Types.ObjectId;
+  if (knownId) {
+    customerId = new mongoose.Types.ObjectId(knownId);
+    void Customer.updateOne(
+      { _id: customerId },
+      {
+        ...(givenName ? { $set: { name: givenName } } : {}),
+      },
+      { writeConcern: FAST_WC },
+    ).catch(() => {
+      /* non-blocking */
+    });
+  } else {
+    const customer = await Customer.findOneAndUpdate(
+      { phone },
+      {
+        $setOnInsert: {
+          phone,
+          preferences: [],
+          ...(givenName ? {} : { name: "Walk-in Customer" }),
+        },
+        ...(givenName ? { $set: { name: givenName } } : {}),
+      },
+      {
+        upsert: true,
+        returnDocument: "after",
+        setDefaultsOnInsert: true,
+        writeConcern: FAST_WC,
+      },
+    );
+    if (!customer) {
+      throw new SaleError("VALIDATION", "Could not resolve customer for hold");
+    }
+    customerId = customer._id as mongoose.Types.ObjectId;
   }
 
-  const displayName = givenName || customer.name || "Walk-in Customer";
-  const sale = await Sale.create(
-    [
-      {
-        customerPhone: phone,
-        customerName: displayName,
-        customerId: customer._id,
-        salesperson,
-        payment: input.payment,
-        status: "held",
-        lines,
-        subtotal,
-        total: subtotal,
-        saleType: resolveSaleType(lines),
-        inventoryDeductions: [],
-      },
-    ],
-    { writeConcern: FAST_WC },
-  );
+  const displayName = givenName || "Walk-in Customer";
+  const now = new Date();
+  const _id = new mongoose.Types.ObjectId();
+  const doc = {
+    _id,
+    customerPhone: phone,
+    customerName: displayName,
+    customerId,
+    salesperson,
+    payment: normalizePayment(input.payment),
+    status: "held" as const,
+    lines: linesForInsert(lines),
+    subtotal,
+    total: subtotal,
+    saleType: resolveSaleType(lines),
+    inventoryDeductions: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  await Sale.collection.insertOne(doc, { writeConcern: FAST_WC });
 
-  return { sale: sale[0], deduplicated: false as const };
+  return {
+    sale: { ...doc, id: String(_id) },
+    deduplicated: false as const,
+    timingMs: undefined as
+      | {
+          total: number;
+          validate: number;
+          stock: number;
+          insert: number;
+        }
+      | undefined,
+  };
 }
 
 async function rollbackAudit(audit: DeductionAuditEntry[]) {
@@ -298,17 +391,16 @@ async function rollbackCustomerTotals(
 }
 
 /**
- * POS complete — target ≤2–3s on Atlas:
- * 1) validate (batched product/formula reads; DB prices + backend oil ml)
- * 2) parallel: atomic FIFO deduct + customer upsert (w:1)
- * 3) Sale.insert
- * Stock enforced by atomic stockSellable reserve — no extra pre-check RTT.
- * Failures compensate stock + customer totals (no slow multi-doc txn).
+ * POS complete — target ≤2s on Atlas:
+ * 1) validate (warm formula cache → usually 1 product read)
+ * 2) parallel: FIFO deduct (reserve∥layers) + customer touch
+ * 3) native Sale.insertOne (skip mongoose doc build)
  */
 export async function createSale(input: CreateSaleInput) {
   const status = input.status ?? "completed";
   if (status === "held") return holdSale(input);
 
+  const t0 = Date.now();
   await connectDB();
 
   if (!input.customerPhone?.trim()) {
@@ -321,73 +413,134 @@ export async function createSale(input: CreateSaleInput) {
   const phone = input.customerPhone.trim();
   const idempotencyKey = input.idempotencyKey?.trim() || undefined;
   const givenName = input.customerName?.trim();
+  const knownCustomerId =
+    input.customerId && mongoose.isValidObjectId(input.customerId)
+      ? input.customerId
+      : null;
+  const payment = normalizePayment(input.payment);
 
   const [salesperson, validated] = await Promise.all([
     resolveSalesperson(input.salesperson),
     validateSaleLines(input.lines),
   ]);
+  const tValidate = Date.now();
 
-  const customerUpdate = {
-    $setOnInsert: {
-      phone,
-      preferences: [] as string[],
-      ...(givenName ? {} : { name: "Walk-in Customer" }),
-    },
-    $set: {
-      lastVisit: new Date(),
-      ...(givenName ? { name: givenName } : {}),
-    },
-    $inc: {
-      totalPurchases: validated.subtotal,
-      ...(input.payment === "credit"
-        ? { creditBalance: validated.subtotal }
-        : {}),
-    },
+  const customerInc = {
+    totalPurchases: validated.subtotal,
+    ...(payment === "credit" ? { creditBalance: validated.subtotal } : {}),
   };
 
   let audit: DeductionAuditEntry[] = [];
   let customerTouched = false;
+  let customerObjectId: mongoose.Types.ObjectId | null = knownCustomerId
+    ? new mongoose.Types.ObjectId(knownCustomerId)
+    : null;
 
   try {
-    // Critical path: deduct stock + upsert customer in parallel
-    const [deductionAudit, customer] = await Promise.all([
-      validated.deductions.length > 0
-        ? applyDeductions(validated.deductions)
-        : Promise.resolve([] as DeductionAuditEntry[]),
-      Customer.findOneAndUpdate({ phone }, customerUpdate, {
-        upsert: true,
-        returnDocument: "after",
-        setDefaultsOnInsert: true,
-        writeConcern: FAST_WC,
-      }),
-    ]);
-    audit = deductionAudit;
-    customerTouched = true;
+    if (knownCustomerId && customerObjectId) {
+      // Known customer: fire-and-forget stats update while FIFO runs (no return doc wait).
+      const customerTouch = Customer.updateOne(
+        { _id: customerObjectId },
+        {
+          $set: {
+            lastVisit: new Date(),
+            ...(givenName ? { name: givenName } : {}),
+          },
+          $inc: customerInc,
+        },
+        { writeConcern: FAST_WC },
+      ).then(() => {
+        customerTouched = true;
+      });
 
-    if (!customer) {
-      throw new SaleError("VALIDATION", "Could not resolve customer");
+      const [deductionAudit] = await Promise.all([
+        validated.deductions.length > 0
+          ? applyDeductions(validated.deductions)
+          : Promise.resolve([] as DeductionAuditEntry[]),
+        customerTouch,
+      ]);
+      audit = deductionAudit;
+    } else {
+      const [deductionAudit, customer] = await Promise.all([
+        validated.deductions.length > 0
+          ? applyDeductions(validated.deductions)
+          : Promise.resolve([] as DeductionAuditEntry[]),
+        Customer.findOneAndUpdate(
+          { phone },
+          {
+            $setOnInsert: {
+              phone,
+              preferences: [] as string[],
+              ...(givenName ? {} : { name: "Walk-in Customer" }),
+            },
+            $set: {
+              lastVisit: new Date(),
+              ...(givenName ? { name: givenName } : {}),
+            },
+            $inc: customerInc,
+          },
+          {
+            upsert: true,
+            returnDocument: "after",
+            setDefaultsOnInsert: true,
+            writeConcern: FAST_WC,
+          },
+        ),
+      ]);
+      audit = deductionAudit;
+      customerTouched = true;
+      if (!customer) {
+        throw new SaleError("VALIDATION", "Could not resolve customer");
+      }
+      customerObjectId = customer._id as mongoose.Types.ObjectId;
     }
 
-    const displayName = givenName || customer.name || "Walk-in";
-    const docs = await Sale.create(
-      [
-        {
-          customerPhone: phone,
-          customerName: displayName,
-          customerId: customer._id,
-          salesperson,
-          payment: input.payment,
-          status,
-          lines: validated.lines,
-          subtotal: validated.subtotal,
-          total: validated.subtotal,
-          saleType: resolveSaleType(validated.lines),
-          idempotencyKey,
-          inventoryDeductions: audit,
-        },
-      ],
-      { writeConcern: FAST_WC },
-    );
+    const tStock = Date.now();
+    const displayName = givenName || "Walk-in";
+    const now = new Date();
+    const _id = new mongoose.Types.ObjectId();
+    const saleDoc = {
+      _id,
+      customerPhone: phone,
+      customerName: displayName,
+      customerId: customerObjectId,
+      salesperson,
+      payment,
+      status,
+      lines: linesForInsert(validated.lines),
+      subtotal: validated.subtotal,
+      total: validated.subtotal,
+      saleType: resolveSaleType(validated.lines),
+      idempotencyKey,
+      inventoryDeductions: auditForInsert(audit),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      await Sale.collection.insertOne(saleDoc, { writeConcern: FAST_WC });
+    } catch (err) {
+      if (idempotencyKey && isDuplicateKey(err)) {
+        const dup = await Sale.findOne({ idempotencyKey }).lean();
+        if (dup) {
+          if (audit.length) await rollbackAudit(audit);
+          if (customerTouched) {
+            await rollbackCustomerTotals(phone, validated.subtotal, payment);
+          }
+          return {
+            sale: { ...dup, id: String(dup._id) },
+            deduplicated: true as const,
+            timingMs: {
+              total: Date.now() - t0,
+              validate: tValidate - t0,
+              stock: tStock - tValidate,
+              insert: Date.now() - tStock,
+            },
+          };
+        }
+      }
+      throw err;
+    }
 
     const productIds = [...new Set(audit.map((a) => a.productId))];
     if (productIds.length > 0) {
@@ -396,21 +549,38 @@ export async function createSale(input: CreateSaleInput) {
       });
     }
 
-    return { sale: docs[0], deduplicated: false as const };
+    const timingMs = {
+      total: Date.now() - t0,
+      validate: tValidate - t0,
+      stock: tStock - tValidate,
+      insert: Date.now() - tStock,
+    };
+    if (timingMs.total > 2000) {
+      console.warn("[createSale] slow POS complete", timingMs);
+    }
+
+    return {
+      sale: { ...saleDoc, id: String(_id) },
+      deduplicated: false as const,
+      timingMs,
+    };
   } catch (err) {
     if (idempotencyKey && isDuplicateKey(err)) {
-      const dup = await Sale.findOne({ idempotencyKey });
+      const dup = await Sale.findOne({ idempotencyKey }).lean();
       if (dup) {
         if (audit.length) await rollbackAudit(audit);
         if (customerTouched) {
-          await rollbackCustomerTotals(phone, validated.subtotal, input.payment);
+          await rollbackCustomerTotals(phone, validated.subtotal, payment);
         }
-        return { sale: dup, deduplicated: true as const };
+        return {
+          sale: { ...dup, id: String(dup._id) },
+          deduplicated: true as const,
+        };
       }
     }
     if (audit.length) await rollbackAudit(audit);
     if (customerTouched) {
-      await rollbackCustomerTotals(phone, validated.subtotal, input.payment);
+      await rollbackCustomerTotals(phone, validated.subtotal, payment);
     }
     throw err;
   }
