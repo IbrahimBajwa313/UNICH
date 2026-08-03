@@ -23,7 +23,7 @@ export type ProductCategory =
   | "Mass Perfumes"
   | "Packaging";
 
-export type StockUnit = "pcs" | "ml";
+export type StockUnit = "pcs" | "ml" | "g" | "kg";
 export type StockBucket = "sellable" | "tester" | "sample" | "personal";
 export type ItemType = "finished" | "packaging" | "raw";
 export type Concentration =
@@ -138,15 +138,62 @@ export interface FormulaComponent {
   unit: StockUnit;
 }
 
-export interface Formula {
-  id: string;
+export type FormulaStatus = "draft" | "approved" | "rejected" | "archived";
+
+export type FormulaAuditAction =
+  | "created"
+  | "updated"
+  | "status_changed"
+  | "restored";
+
+/** Append-only change log (separate from recipe version snapshots). */
+export interface FormulaAuditEntry {
+  at: string;
+  by?: string;
+  action: FormulaAuditAction;
+  detail?: string;
+  fromStatus?: FormulaStatus;
+  toStatus?: FormulaStatus;
+  fromVersion?: number;
+  toVersion?: number;
+}
+
+/** BLD-02 fixed BOM/formula types — not PRD-01 product categories. */
+export type FormulaType = "remix" | "oil" | "bakhoor";
+
+/** Snapshot of a formula recipe before an edit (immutable history). */
+export interface FormulaVersion {
+  version: number;
   name: string;
-  type: "remix" | "custom" | "signature";
+  type: FormulaType;
+  status: FormulaStatus;
   customerId?: string;
   customerName?: string;
   yieldMl: number;
   components: FormulaComponent[];
   notes?: string;
+  savedAt: string;
+  savedBy?: string;
+}
+
+export interface Formula {
+  id: string;
+  name: string;
+  type: FormulaType;
+  status: FormulaStatus;
+  /** Current recipe revision (starts at 1). */
+  version: number;
+  /** Prior revisions; newest push last. */
+  versions: FormulaVersion[];
+  /** Audit / change log. */
+  history: FormulaAuditEntry[];
+  customerId?: string;
+  customerName?: string;
+  yieldMl: number;
+  components: FormulaComponent[];
+  notes?: string;
+  approvedAt?: string;
+  approvedBy?: string;
   updatedAt: string;
 }
 

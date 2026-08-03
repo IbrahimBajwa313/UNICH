@@ -28,10 +28,12 @@ export function Button({
   size = "md",
   className,
   children,
+  type = "button",
   ...props
 }: ButtonProps) {
   return (
     <button
+      type={type}
       className={clsx(
         "inline-flex items-center justify-center font-medium transition-all duration-200 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50",
         variants[variant],

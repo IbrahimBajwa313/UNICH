@@ -8,6 +8,8 @@ import {
   CreditCard,
   FileClock,
   FileText,
+  FlaskConical,
+  History,
   Mail,
   Pause,
   Play,
@@ -37,8 +39,14 @@ import {
 } from "@/lib/receipt/print";
 import { receiptText } from "@/lib/receipt/text";
 import type { ReceiptFormat, ReceiptLine } from "@/lib/receipt/types";
-import { matchRemixRole } from "@/lib/sales/constants";
-import type { AppSettings, Customer, PaymentMethod, Product } from "@/lib/types";
+import { OIL_BASE_PRODUCT_ID, matchRemixRole } from "@/lib/sales/constants";
+import type {
+  AppSettings,
+  Customer,
+  Formula,
+  PaymentMethod,
+  Product,
+} from "@/lib/types";
 
 type CatalogFilter = "all" | "ready" | "oil" | "custom";
 
@@ -69,6 +77,7 @@ type HeldSaleLine = {
   bomNote?: string;
   deductMl?: number;
   oilProductId?: string;
+  formulaId?: string;
 };
 
 type HeldSale = {
@@ -98,7 +107,15 @@ type LastSale = {
   lines: ReceiptLine[];
 };
 
-type PackagingGroup = "bottle" | "cap" | "atomizer" | "collar" | "pouch" | "other";
+type PackagingGroup =
+  | "bottle"
+  | "cap"
+  | "atomizer"
+  | "collar"
+  | "label"
+  | "box"
+  | "pouch"
+  | "other";
 
 const PACKAGING_GROUPS: {
   id: PackagingGroup;
@@ -108,13 +125,22 @@ const PACKAGING_GROUPS: {
   { id: "cap", label: "Caps" },
   { id: "atomizer", label: "Atomizers" },
   { id: "collar", label: "Collars" },
+  { id: "label", label: "Labels" },
+  { id: "box", label: "Boxes" },
   { id: "pouch", label: "Pouches" },
   { id: "other", label: "Other" },
 ];
 
 function packagingGroupOf(product: Product): PackagingGroup {
   const role = matchRemixRole(product.name, product.sku);
-  if (role === "bottle" || role === "cap" || role === "atomizer" || role === "collar") {
+  if (
+    role === "bottle" ||
+    role === "cap" ||
+    role === "atomizer" ||
+    role === "collar" ||
+    role === "label" ||
+    role === "box"
+  ) {
     return role;
   }
   if (/\bpouch\b/i.test(product.name) || /^PCH-/i.test(product.sku)) {
@@ -134,8 +160,11 @@ type CartLine = {
   bomNote?: string;
   oilProductId?: string;
   oilProductName?: string;
+  formulaId?: string;
+  formulaName?: string;
 };
 const emptyProducts: Product[] = [];
+const emptyFormulas: Formula[] = [];
 
 const payments: { id: PaymentMethod; label: string; icon: React.ReactNode }[] = [
   { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" /> },
@@ -192,6 +221,25 @@ export default function PosPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [customerMatch, setCustomerMatch] = useState<string | null>(null);
+  const [matchedCustomerId, setMatchedCustomerId] = useState<string | null>(
+    null,
+  );
+  const { data: customerFormulas, loading: formulasLoading } = useApiData<
+    Formula[]
+  >(
+    matchedCustomerId
+      ? `/api/formulas?customerId=${matchedCustomerId}&status=approved`
+      : null,
+  );
+  const pastOrdersPhone =
+    digitsOnly(phone).length >= 7 ? phone.trim() : "";
+  const { data: pastOrders, loading: pastOrdersLoading } = useApiData<
+    HeldSale[]
+  >(
+    pastOrdersPhone
+      ? `/api/sales?status=completed&phone=${encodeURIComponent(pastOrdersPhone)}&limit=5`
+      : null,
+  );
   const [toast, setToast] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"ok" | "err">("ok");
   const [checkingOut, setCheckingOut] = useState(false);
@@ -231,12 +279,20 @@ export default function PosPage() {
     () => inventory.filter((p) => p.unit === "ml" && p.category !== "Packaging"),
     [inventory],
   );
+  const savedFormulas = customerFormulas ?? emptyFormulas;
+  const recentOrders = pastOrders ?? emptyHeld;
+
+  useEffect(() => {
+    if (!remixOilId && oilProducts.length > 0) {
+      setRemixOilId(oilProducts[0].id);
+    }
+  }, [oilProducts, remixOilId]);
 
   const packagingProducts = useMemo(
     () =>
       inventory.filter(
         (p) =>
-          p.category === "Packaging" &&
+          (p.category === "Packaging" || p.category === "Gift Boxes") &&
           p.unit !== "ml" &&
           !/ethanol|fixative/i.test(p.name),
       ),
@@ -336,6 +392,7 @@ export default function PosPage() {
     const digits = digitsOnly(phone);
     if (digits.length < 7) {
       setCustomerMatch(null);
+      setMatchedCustomerId(null);
       return;
     }
     const seq = ++phoneLookupSeq.current;
@@ -353,13 +410,18 @@ export default function PosPage() {
           });
         if (match) {
           setCustomerMatch(match.name);
+          setMatchedCustomerId(match.id);
           setCustomerName(match.name);
           setEmail(match.email?.trim() || "");
         } else {
           setCustomerMatch(null);
+          setMatchedCustomerId(null);
         }
       } catch {
-        if (seq === phoneLookupSeq.current) setCustomerMatch(null);
+        if (seq === phoneLookupSeq.current) {
+          setCustomerMatch(null);
+          setMatchedCustomerId(null);
+        }
       }
     }, 320);
     return () => window.clearTimeout(timer);
@@ -441,6 +503,118 @@ export default function PosPage() {
       },
     ]);
     flash(`Remix added · oil ${oil.name}`);
+  }
+
+  /** BLD-08: reuse an approved customer formula on the current order. */
+  function applyCustomerFormula(formula: Formula) {
+    const remix = inventory.find((p) => p.category === "Customized Perfumes");
+    if (!remix) {
+      return flash("Create a customized perfume product first", 5000, "err");
+    }
+
+    const hasOilBase = formula.components.some(
+      (c) => c.productId === OIL_BASE_PRODUCT_ID,
+    );
+    let oilProductId: string | undefined;
+    let oilProductName: string | undefined;
+
+    if (hasOilBase) {
+      const oil = oilProducts.find((p) => p.id === remixOilId);
+      if (!oil) {
+        return flash("Oil not selected for this formula", 5000, "err");
+      }
+      oilProductId = oil.id;
+      oilProductName = oil.name;
+    } else {
+      const oilComp = formula.components.find((c) => {
+        if (c.productId === OIL_BASE_PRODUCT_ID) return false;
+        const p = inventory.find((x) => x.id === c.productId);
+        if (!p || p.unit !== "ml") return false;
+        return !matchRemixRole(c.productName, p.sku);
+      });
+      if (oilComp) {
+        oilProductId = oilComp.productId;
+        oilProductName = oilComp.productName;
+      }
+    }
+
+    setCart((prev) => [
+      ...prev,
+      {
+        key: `remix-${formula.id}-${Date.now()}`,
+        product: remix,
+        qty: 1,
+        unitLabel: "pcs",
+        unitPrice: remix.sellPrice,
+        lineType: "remix",
+        formulaId: formula.id,
+        formulaName: formula.name,
+        oilProductId,
+        oilProductName,
+        bomNote: `Reuse: ${formula.name} (v${formula.version || 1})`,
+      },
+    ]);
+    flash(`Reused formula · ${formula.name}`);
+  }
+
+  /** Reuse a remix (or ready) line from a previous completed order. */
+  function reusePastOrder(sale: HeldSale) {
+    const remixLine = (sale.lines || []).find((l) => l.lineType === "remix");
+    if (remixLine) {
+      if (remixLine.formulaId) {
+        const formula = savedFormulas.find((f) => f.id === remixLine.formulaId);
+        if (formula) {
+          applyCustomerFormula(formula);
+          return;
+        }
+      }
+      const remix = inventory.find((p) => p.category === "Customized Perfumes");
+      if (!remix) {
+        return flash("Create a customized perfume product first", 5000, "err");
+      }
+      const oilId = remixLine.oilProductId
+        ? String(remixLine.oilProductId)
+        : remixOilId;
+      const oil = oilProducts.find((p) => p.id === oilId);
+      if (!remixLine.formulaId && !oil) {
+        return flash("Oil not selected — pick remix oil first", 5000, "err");
+      }
+      setCart((prev) => [
+        ...prev,
+        {
+          key: `remix-past-${sale.id}-${Date.now()}`,
+          product: remix,
+          qty: remixLine.qty || 1,
+          unitLabel: "pcs",
+          unitPrice: remix.sellPrice,
+          lineType: "remix",
+          formulaId: remixLine.formulaId
+            ? String(remixLine.formulaId)
+            : undefined,
+          formulaName: remixLine.bomNote?.startsWith("Reuse:")
+            ? remixLine.bomNote.replace(/^Reuse:\s*/, "").replace(/\s*\(v\d+\)$/, "")
+            : undefined,
+          oilProductId: oil?.id,
+          oilProductName: oil?.name,
+          bomNote:
+            remixLine.bomNote ||
+            `Repeat order · ${sale.time || "previous"}`,
+        },
+      ]);
+      flash("Previous remix added to cart");
+      return;
+    }
+
+    const ready = (sale.lines || []).find((l) => l.lineType === "ready");
+    if (ready?.productId) {
+      const product = inventory.find((p) => p.id === String(ready.productId));
+      if (product) {
+        addReady(product);
+        flash("Previous item added to cart");
+        return;
+      }
+    }
+    flash("Nothing reusable on that order", 4000, "err");
   }
 
   function addOil(product: Product, unit: "tola" | "half_tola" | "quarter_tola") {
@@ -577,7 +751,7 @@ export default function PosPage() {
       return;
     }
     const missingOil = cart.some(
-      (l) => l.lineType === "remix" && !l.oilProductId,
+      (l) => l.lineType === "remix" && !l.oilProductId && !l.formulaId,
     );
     if (missingOil) {
       flash("Oil not selected for remix line", 5000, "err");
@@ -594,6 +768,8 @@ export default function PosPage() {
       payment,
       salesperson,
       subtotal,
+      matchedCustomerId,
+      customerMatch,
     };
     // Clear cart immediately (same feel as Hold) — restore if save fails
     setCart([]);
@@ -602,6 +778,7 @@ export default function PosPage() {
     setPhone("");
     setEmail("");
     setCustomerMatch(null);
+    setMatchedCustomerId(null);
     try {
       const sale = await api<{ id: string; total?: number }>("/api/sales", {
         method: "POST",
@@ -622,6 +799,7 @@ export default function PosPage() {
             deductMl: line.deductMl,
             bomNote: line.bomNote,
             oilProductId: line.oilProductId,
+            formulaId: line.formulaId,
           })),
         }),
       });
@@ -659,6 +837,8 @@ export default function PosPage() {
       setPhone(snapshot.phone);
       setEmail(snapshot.email);
       setPayment(snapshot.payment);
+      setCustomerMatch(snapshot.customerMatch);
+      setMatchedCustomerId(snapshot.matchedCustomerId);
       flash(err instanceof Error ? err.message : "Could not complete sale", 6000, "err");
     } finally {
       setCheckingOut(false);
@@ -739,6 +919,7 @@ export default function PosPage() {
       const oilProduct = oilId
         ? inventory.find((p) => p.id === oilId)
         : undefined;
+      const formulaId = line.formulaId ? String(line.formulaId) : undefined;
 
       if (line.lineType === "packaging" && productId) {
         packaging[packagingGroupOf(product)] = productId;
@@ -755,6 +936,7 @@ export default function PosPage() {
         bomNote: line.bomNote,
         oilProductId: oilId,
         oilProductName: oilProduct?.name,
+        formulaId,
       };
     });
     return { lines, packaging };
@@ -782,6 +964,8 @@ export default function PosPage() {
       email,
       cart,
       packagingPick,
+      matchedCustomerId,
+      customerMatch,
     };
     // Clear terminal immediately so the cashier feels instant feedback
     setCart([]);
@@ -790,6 +974,7 @@ export default function PosPage() {
     setPhone("");
     setEmail("");
     setCustomerMatch(null);
+    setMatchedCustomerId(null);
     try {
       const held = await api<HeldSale>("/api/sales", {
         method: "POST",
@@ -809,6 +994,7 @@ export default function PosPage() {
             deductMl: line.deductMl,
             bomNote: line.bomNote,
             oilProductId: line.oilProductId,
+            formulaId: line.formulaId,
           })),
         }),
       });
@@ -820,6 +1006,8 @@ export default function PosPage() {
       setPackagingPick(snapshot.packagingPick);
       setCustomerName(snapshot.customerName);
       setPhone(snapshot.phone);
+      setCustomerMatch(snapshot.customerMatch);
+      setMatchedCustomerId(snapshot.matchedCustomerId);
       setEmail(snapshot.email);
       flash(err instanceof Error ? err.message : "Could not hold bill", 6000, "err");
     } finally {
@@ -1474,6 +1662,7 @@ export default function PosPage() {
                     setPhone(e.target.value);
                     if (digitsOnly(e.target.value).length < 7) {
                       setCustomerMatch(null);
+                      setMatchedCustomerId(null);
                     }
                   }}
                   placeholder="+971 …"
@@ -1494,6 +1683,137 @@ export default function PosPage() {
                 />
               </label>
             </div>
+
+            {pastOrdersPhone ? (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-lg border border-line/70 bg-mist/40 px-3 py-2">
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <History className="h-3.5 w-3.5 text-gold-deep" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                      Previous orders
+                    </p>
+                    {customerMatch ? (
+                      <Badge tone="success" className="h-4 px-1.5 text-[9px]">
+                        {customerMatch}
+                      </Badge>
+                    ) : null}
+                    {pastOrdersLoading ? (
+                      <span className="text-[10px] text-ink-muted">Loading…</span>
+                    ) : null}
+                  </div>
+                  {!pastOrdersLoading && recentOrders.length === 0 ? (
+                    <p className="text-[11px] text-ink-muted">
+                      No completed orders for this number yet.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {recentOrders.map((sale) => {
+                        const remix = (sale.lines || []).find(
+                          (l) => l.lineType === "remix",
+                        );
+                        const summary =
+                          remix?.bomNote ||
+                          remix?.name ||
+                          sale.lines?.[0]?.name ||
+                          sale.saleType ||
+                          "Sale";
+                        return (
+                          <li
+                            key={sale.id}
+                            className="flex items-center justify-between gap-2 rounded-md border border-line/60 bg-canvas/70 px-2 py-1.5"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-medium">
+                                {summary}
+                              </p>
+                              <p className="text-[10px] text-ink-muted">
+                                {sale.time || "—"} · {formatMoney(sale.total)} ·{" "}
+                                {(sale.lines || []).length} items
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="h-7 shrink-0 px-2 text-[11px]"
+                              onClick={() => reusePastOrder(sale)}
+                            >
+                              Reuse
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {matchedCustomerId ? (
+                  <div className="rounded-lg border border-line/70 bg-mist/40 px-3 py-2">
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      <FlaskConical className="h-3.5 w-3.5 text-gold-deep" />
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                        Saved formulas
+                      </p>
+                      {formulasLoading ? (
+                        <span className="text-[10px] text-ink-muted">
+                          Loading…
+                        </span>
+                      ) : null}
+                    </div>
+                    {!formulasLoading && savedFormulas.length === 0 ? (
+                      <p className="text-[11px] text-ink-muted">
+                        No approved formulas for this customer.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {savedFormulas.map((f) => (
+                          <li
+                            key={f.id}
+                            className="flex items-center justify-between gap-2 rounded-md border border-line/60 bg-canvas/70 px-2 py-1.5"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-medium">
+                                {f.name}
+                              </p>
+                              <p className="text-[10px] text-ink-muted">
+                                {f.components.length} components · {f.yieldMl} ml
+                                · v{f.version || 1}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="h-7 shrink-0 px-2 text-[11px]"
+                              onClick={() => applyCustomerFormula(f)}
+                            >
+                              Reuse
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {oilProducts.length > 0 ? (
+              <label className="mt-2 block">
+                <span className="text-[11px] font-medium text-ink-muted">
+                  Remix oil (for standard remix / oil-base formulas)
+                </span>
+                <select
+                  value={remixOilId}
+                  onChange={(e) => setRemixOilId(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                >
+                  {oilProducts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </div>
 
           {/* Only cart / held scrolls */}
@@ -1515,9 +1835,11 @@ export default function PosPage() {
                       </p>
                       <p className="text-[11px] text-ink-muted">
                         {line.unitLabel} · {line.lineType}
-                        {line.oilProductName
-                          ? ` · oil: ${line.oilProductName}`
-                          : ""}
+                        {line.formulaName
+                          ? ` · ${line.formulaName}`
+                          : line.oilProductName
+                            ? ` · oil: ${line.oilProductName}`
+                            : ""}
                       </p>
                       {line.bomNote ? (
                         <p className="mt-0.5 text-[10px] text-sage">

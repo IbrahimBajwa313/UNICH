@@ -3,6 +3,7 @@ import { resolveDeductMlFromUnitLabel } from "@/lib/format";
 import { Formula, Product } from "@/lib/models";
 import {
   OIL_BASE_PRODUCT_ID,
+  REMIX_OIL_ML,
   REMIX_REQUIRED_ROLES,
   matchRemixRole,
   roleLabel,
@@ -23,6 +24,8 @@ export type IncomingSaleLine = {
   /** Ignored for remix — backend uses formula oil qty. */
   oilMl?: number;
   packagingProductIds?: string[];
+  /** BLD-08: reuse a specific (customer) formula instead of the default remix BOM. */
+  formulaId?: string;
 };
 
 export type DeductionNeed = {
@@ -45,6 +48,7 @@ export type ValidatedSaleLine = {
   oilProductId?: string;
   oilMl?: number;
   packagingProductIds?: string[];
+  formulaId?: string;
 };
 
 export type SaleValidationResult = {
@@ -54,6 +58,7 @@ export type SaleValidationResult = {
 };
 
 type FormulaDoc = {
+  _id?: mongoose.Types.ObjectId;
   components: Array<{
     productId: string;
     productName: string;
@@ -62,6 +67,9 @@ type FormulaDoc = {
   }>;
   yieldMl: number;
   name: string;
+  customerId?: mongoose.Types.ObjectId | null;
+  status?: string;
+  type?: string;
 };
 
 type ProductLean = {
@@ -91,10 +99,149 @@ function resolvePriceFromProduct(
   return { name: product.name, unitPrice, unit: product.unit };
 }
 
+async function resolveComponentProduct(
+  productsById: Map<string, ProductLean>,
+  productId: string,
+  productName: string,
+): Promise<ProductLean> {
+  let product = productsById.get(productId);
+  if (!product) {
+    const loaded = await Product.findById(productId).lean<ProductLean>();
+    if (!loaded) {
+      throw new SaleError(
+        "FORMULA_INCOMPLETE",
+        `Formula incomplete: product not found for ${productName}`,
+      );
+    }
+    product = loaded;
+    productsById.set(productId, product);
+  }
+  return product;
+}
+
+/**
+ * Customer blend (BLD-08 reuse): concrete oils in the formula, no oil-base.
+ * Deducts every component; fills missing packaging/ethanol/fixative from fallback BOM.
+ */
+async function validateCustomerBlendSale(
+  formula: FormulaDoc,
+  options: {
+    lineQty: number;
+    lineIndex: number;
+    productsById: Map<string, ProductLean>;
+    packagingFallback?: FormulaDoc | null;
+  },
+): Promise<{
+  oilMl: number;
+  oilProductId?: string;
+  oilProductName?: string;
+  componentDeductions: DeductionNeed[];
+}> {
+  const { lineQty, lineIndex, productsById } = options;
+  const foundRoles = new Map<RemixRequiredRole, FormulaDoc["components"][number]>();
+  const componentDeductions: DeductionNeed[] = [];
+  let oilMl = 0;
+  let primaryOil:
+    | { productId: string; productName: string; qty: number }
+    | undefined;
+
+  for (const comp of formula.components) {
+    if (comp.productId === OIL_BASE_PRODUCT_ID) continue;
+    if (!mongoose.isValidObjectId(comp.productId)) {
+      throw new SaleError(
+        "FORMULA_INCOMPLETE",
+        `Formula incomplete: invalid product for ${comp.productName}`,
+      );
+    }
+    if (!Number.isFinite(comp.qty) || comp.qty <= 0) {
+      throw new SaleError(
+        "FORMULA_INCOMPLETE",
+        `Formula incomplete: invalid qty for ${comp.productName}`,
+      );
+    }
+
+    const product = await resolveComponentProduct(
+      productsById,
+      comp.productId,
+      comp.productName,
+    );
+    const role = matchRemixRole(comp.productName, product.sku);
+    if (role && !foundRoles.has(role)) {
+      foundRoles.set(role, comp);
+    } else if (!role && product.unit === "ml") {
+      oilMl += comp.qty;
+      if (!primaryOil) {
+        primaryOil = {
+          productId: comp.productId,
+          productName: comp.productName,
+          qty: comp.qty,
+        };
+      }
+    }
+
+    componentDeductions.push({
+      productId: comp.productId,
+      productName: comp.productName,
+      qty: comp.qty * lineQty,
+      reason: role ? `remix:${role}` : `remix:blend:${comp.productName}`,
+      lineIndex,
+    });
+  }
+
+  if (oilMl <= 0) {
+    throw new SaleError(
+      "FORMULA_INCOMPLETE",
+      "Formula incomplete: customer blend has no oil components",
+    );
+  }
+
+  // Fill missing required roles from the default remix BOM when present.
+  const fallback = options.packagingFallback;
+  if (fallback) {
+    for (const role of REMIX_REQUIRED_ROLES) {
+      if (foundRoles.has(role)) continue;
+      for (const comp of fallback.components) {
+        if (comp.productId === OIL_BASE_PRODUCT_ID) continue;
+        if (!mongoose.isValidObjectId(comp.productId)) continue;
+        const product = await resolveComponentProduct(
+          productsById,
+          comp.productId,
+          comp.productName,
+        );
+        if (matchRemixRole(comp.productName, product.sku) !== role) continue;
+        foundRoles.set(role, comp);
+        componentDeductions.push({
+          productId: comp.productId,
+          productName: comp.productName,
+          qty: comp.qty * lineQty,
+          reason: `remix:${role}`,
+          lineIndex,
+        });
+        break;
+      }
+    }
+  }
+
+  const missing = REMIX_REQUIRED_ROLES.filter((role) => !foundRoles.has(role));
+  if (missing.length > 0) {
+    throw new SaleError(
+      "FORMULA_INCOMPLETE",
+      `Formula incomplete: ${missing.map(roleLabel).join(", ")} missing`,
+    );
+  }
+
+  return {
+    oilMl,
+    oilProductId: primaryOil?.productId,
+    oilProductName: primaryOil?.productName,
+    componentDeductions,
+  };
+}
+
 /**
  * Validates remix formula presence + required packaging/raw roles.
- * Oil is a separate mandatory selection (oil-base placeholder).
- * Uses a preloaded product map to avoid N+1 Atlas round-trips.
+ * Oil is a separate mandatory selection when formula uses oil-base placeholder.
+ * Customer blends (concrete oils, no oil-base) deduct recipe lines directly.
  */
 export async function validateRemixSale(
   formula: FormulaDoc | null,
@@ -103,11 +250,12 @@ export async function validateRemixSale(
     lineQty: number;
     lineIndex: number;
     productsById?: Map<string, ProductLean>;
+    packagingFallback?: FormulaDoc | null;
   },
 ): Promise<{
   oilMl: number;
-  oilProductId: string;
-  oilProductName: string;
+  oilProductId?: string;
+  oilProductName?: string;
   componentDeductions: DeductionNeed[];
 }> {
   if (!formula) {
@@ -138,23 +286,26 @@ export async function validateRemixSale(
       );
     }
 
-    let product = productsById.get(comp.productId);
-    if (!product) {
-      const loaded = await Product.findById(comp.productId).lean<ProductLean>();
-      if (!loaded) {
-        throw new SaleError(
-          "FORMULA_INCOMPLETE",
-          `Formula incomplete: product not found for ${comp.productName}`,
-        );
-      }
-      product = loaded;
-      productsById.set(comp.productId, product);
-    }
+    const product = await resolveComponentProduct(
+      productsById,
+      comp.productId,
+      comp.productName,
+    );
 
     const role = matchRemixRole(comp.productName, product.sku);
     if (role && !foundRoles.has(role)) {
       foundRoles.set(role, comp);
     }
+  }
+
+  // BLD-08 customer formula reuse — concrete oils, no oil-base placeholder.
+  if (!oilComponent) {
+    return validateCustomerBlendSale(formula, {
+      lineQty: options.lineQty,
+      lineIndex: options.lineIndex,
+      productsById,
+      packagingFallback: options.packagingFallback,
+    });
   }
 
   const missing = REMIX_REQUIRED_ROLES.filter((role) => !foundRoles.has(role));
@@ -165,10 +316,17 @@ export async function validateRemixSale(
     );
   }
 
-  if (!oilComponent || oilComponent.qty <= 0) {
+  if (oilComponent.qty <= 0) {
     throw new SaleError(
       "FORMULA_INCOMPLETE",
       "Formula incomplete: oil quantity (oil-base) missing",
+    );
+  }
+
+  if (oilComponent.qty !== REMIX_OIL_ML) {
+    throw new SaleError(
+      "FORMULA_INCOMPLETE",
+      `Formula incomplete: remix oil must be ${REMIX_OIL_ML} ml (BLD-02/03)`,
     );
   }
 
@@ -207,7 +365,7 @@ export async function validateRemixSale(
     });
   }
 
-  // Also deduct any other valid BOM components (e.g. pouch) that are not required roles
+  // Also deduct any other valid BOM components (e.g. pouch) outside required roles
   for (const comp of formula.components) {
     if (comp.productId === OIL_BASE_PRODUCT_ID) continue;
     if (!mongoose.isValidObjectId(comp.productId)) continue;
@@ -264,6 +422,7 @@ export async function validateSaleLines(
 
   const needsRemix = rawLines.some((l) => l.lineType === "remix");
   const productIds = new Set<string>();
+  const formulaIds = new Set<string>();
 
   for (const raw of rawLines) {
     if (raw.productId && mongoose.isValidObjectId(raw.productId)) {
@@ -272,6 +431,9 @@ export async function validateSaleLines(
     if (raw.oilProductId && mongoose.isValidObjectId(raw.oilProductId)) {
       productIds.add(raw.oilProductId);
     }
+    if (raw.formulaId && mongoose.isValidObjectId(raw.formulaId)) {
+      formulaIds.add(raw.formulaId);
+    }
     if (Array.isArray(raw.packagingProductIds)) {
       for (const id of raw.packagingProductIds) {
         if (mongoose.isValidObjectId(id)) productIds.add(id);
@@ -279,10 +441,20 @@ export async function validateSaleLines(
     }
   }
 
-  const [remixFormula, products] = await Promise.all([
+  const [defaultRemixFormula, namedFormulas, products] = await Promise.all([
     needsRemix
-      ? Formula.findOne({ type: "remix" }).lean<FormulaDoc>()
+      ? Formula.findOne({
+          type: "remix",
+          status: "approved",
+          $or: [{ customerId: null }, { customerId: { $exists: false } }],
+        }).lean<FormulaDoc>()
       : Promise.resolve(null),
+    formulaIds.size > 0
+      ? Formula.find({
+          _id: { $in: [...formulaIds] },
+          status: "approved",
+        }).lean<FormulaDoc[]>()
+      : Promise.resolve([] as FormulaDoc[]),
     productIds.size > 0
       ? Product.find({ _id: { $in: [...productIds] } })
           .select("name sku unit sellPrice wholesalePrice stockSellable")
@@ -290,26 +462,43 @@ export async function validateSaleLines(
       : Promise.resolve([] as ProductLean[]),
   ]);
 
+  // Fallback if no anonymous default exists (legacy DB with only customer formulas).
+  const remixFormula =
+    defaultRemixFormula ||
+    (needsRemix
+      ? await Formula.findOne({ type: "remix", status: "approved" }).lean<FormulaDoc>()
+      : null);
+
+  const formulasById = new Map<string, FormulaDoc>(
+    namedFormulas.map((f) => [String(f._id), f]),
+  );
+
   const productsById = new Map<string, ProductLean>(
     products.map((p) => [String(p._id), p]),
   );
 
-  // Prefetch remix BOM component products in one query
-  if (remixFormula) {
-    const missing = remixFormula.components
-      .map((c) => c.productId)
-      .filter(
-        (id) =>
-          id !== OIL_BASE_PRODUCT_ID &&
-          mongoose.isValidObjectId(id) &&
-          !productsById.has(id),
-      );
-    if (missing.length > 0) {
-      const extra = await Product.find({ _id: { $in: missing } })
-        .select("name sku unit sellPrice wholesalePrice stockSellable")
-        .lean<ProductLean[]>();
-      for (const p of extra) productsById.set(String(p._id), p);
+  // Prefetch BOM component products for every formula used on this sale.
+  const formulaDocs = [
+    ...(remixFormula ? [remixFormula] : []),
+    ...namedFormulas,
+  ];
+  const missingComponentIds = new Set<string>();
+  for (const doc of formulaDocs) {
+    for (const c of doc.components) {
+      if (
+        c.productId !== OIL_BASE_PRODUCT_ID &&
+        mongoose.isValidObjectId(c.productId) &&
+        !productsById.has(c.productId)
+      ) {
+        missingComponentIds.add(c.productId);
+      }
     }
+  }
+  if (missingComponentIds.size > 0) {
+    const extra = await Product.find({ _id: { $in: [...missingComponentIds] } })
+      .select("name sku unit sellPrice wholesalePrice stockSellable")
+      .lean<ProductLean[]>();
+    for (const p of extra) productsById.set(String(p._id), p);
   }
 
   const lines: ValidatedSaleLine[] = [];
@@ -486,24 +675,36 @@ export async function validateSaleLines(
     }
 
     if (lineType === "remix") {
-      const remix = await validateRemixSale(remixFormula as FormulaDoc | null, {
+      let formulaForLine: FormulaDoc | null = remixFormula;
+      if (raw.formulaId) {
+        if (!mongoose.isValidObjectId(raw.formulaId)) {
+          throw new SaleError("FORMULA_MISSING", "Invalid formula id");
+        }
+        formulaForLine = formulasById.get(raw.formulaId) || null;
+        if (!formulaForLine) {
+          throw new SaleError(
+            "FORMULA_MISSING",
+            "Saved formula not found or not approved",
+          );
+        }
+      }
+
+      const remix = await validateRemixSale(formulaForLine, {
         oilProductId: raw.oilProductId,
         lineQty: qty,
         lineIndex: i,
         productsById,
+        packagingFallback: remixFormula,
       });
 
-      let unitPrice = 0;
-      let name = raw.name || "Remix";
-      let productId = raw.productId;
       if (!raw.productId || !mongoose.isValidObjectId(raw.productId)) {
         throw new SaleError("INVALID_LINE", "Remix product required");
       }
       const product = requireProduct(productsById, raw.productId);
       const resolved = resolvePriceFromProduct(product, "remix");
-      unitPrice = resolved.unitPrice;
-      name = resolved.name;
-      productId = raw.productId;
+      const unitPrice = resolved.unitPrice;
+      const name = resolved.name;
+      const productId = raw.productId;
 
       lines.push({
         productId,
@@ -514,9 +715,12 @@ export async function validateSaleLines(
         lineType: "remix",
         bomNote:
           raw.bomNote ||
-          `BOM: ${remix.oilMl}ml ${remix.oilProductName} + formula components`,
+          (remix.oilProductName
+            ? `BOM: ${remix.oilMl}ml ${remix.oilProductName} + formula components`
+            : `BOM: ${formulaForLine?.name || "formula"}`),
         oilProductId: remix.oilProductId,
         oilMl: remix.oilMl,
+        formulaId: raw.formulaId,
       });
       deductions.push(...remix.componentDeductions);
       subtotal += qty * unitPrice;

@@ -9,8 +9,10 @@ import {
   matchRemixRole,
   REMIX_REQUIRED_ROLES,
   OIL_BASE_PRODUCT_ID,
+  REMIX_OIL_ML,
   roleLabel,
 } from "./constants";
+import { validateFormulaInput } from "../formulas/validateFormula";
 import { SaleError } from "./errors";
 
 let passed = 0;
@@ -34,6 +36,9 @@ test("matches required remix roles", () => {
   assert.equal(matchRemixRole("Cap — Standard Gold", "CAP-STD"), "cap");
   assert.equal(matchRemixRole("Atomizer", "ATM-STD"), "atomizer");
   assert.equal(matchRemixRole("Collar", "COL-STD"), "collar");
+  assert.equal(matchRemixRole("Label — Standard", "LBL-STD"), "label");
+  assert.equal(matchRemixRole("Carton Box — Standard", "BOX-STD"), "box");
+  assert.equal(matchRemixRole("Gift Box — Duo", "GB-001"), "box");
   assert.equal(matchRemixRole("Ethanol 96%", "ETH-96"), "ethanol");
   assert.equal(matchRemixRole("Fixative — Standard", "FIX-STD"), "fixative");
 });
@@ -47,12 +52,14 @@ test("roleLabel capitalizes", () => {
   assert.equal(roleLabel("fixative"), "Fixative");
 });
 
-test("six required roles listed", () => {
+test("eight required roles listed", () => {
   assert.deepEqual([...REMIX_REQUIRED_ROLES], [
     "bottle",
     "cap",
     "atomizer",
     "collar",
+    "label",
+    "box",
     "ethanol",
     "fixative",
   ]);
@@ -94,21 +101,68 @@ function validateFormulaRolesLocal(
       "Formula incomplete: oil quantity (oil-base) missing",
     );
   }
+  if (oil.qty !== REMIX_OIL_ML) {
+    throw new SaleError(
+      "FORMULA_INCOMPLETE",
+      `Formula incomplete: remix oil must be ${REMIX_OIL_ML} ml (BLD-02/03)`,
+    );
+  }
   return oil.qty;
 }
 
 const complete = [
-  { productId: OIL_BASE_PRODUCT_ID, productName: "Selected Oil Blend", qty: 20 },
+  {
+    productId: OIL_BASE_PRODUCT_ID,
+    productName: "Selected Oil Blend",
+    qty: REMIX_OIL_ML,
+  },
   { productId: "1", productName: "Ethanol 96%", qty: 80, sku: "ETH-96" },
   { productId: "2", productName: "Fixative — Standard", qty: 2, sku: "FIX-STD" },
   { productId: "3", productName: "Glass Bottle 100ml", qty: 1, sku: "BOT-100" },
   { productId: "4", productName: "Cap — Standard Gold", qty: 1, sku: "CAP-STD" },
   { productId: "5", productName: "Atomizer", qty: 1, sku: "ATM-STD" },
   { productId: "6", productName: "Collar", qty: 1, sku: "COL-STD" },
+  { productId: "7", productName: "Label — Standard", qty: 1, sku: "LBL-STD" },
+  { productId: "8", productName: "Carton Box — Standard", qty: 1, sku: "BOX-STD" },
 ];
 
 test("complete formula returns oil ml 20", () => {
-  assert.equal(validateFormulaRolesLocal(complete), 20);
+  assert.equal(REMIX_OIL_ML, 20);
+  assert.equal(validateFormulaRolesLocal(complete), REMIX_OIL_ML);
+});
+
+test("remix oil-base must be exactly 20 ml", () => {
+  const wrongOil = complete.map((c) =>
+    c.productId === OIL_BASE_PRODUCT_ID ? { ...c, qty: 18 } : c,
+  );
+  assert.throws(
+    () => validateFormulaRolesLocal(wrongOil),
+    (err: unknown) =>
+      err instanceof SaleError &&
+      err.code === "FORMULA_INCOMPLETE" &&
+      /remix oil must be 20 ml/i.test(err.message),
+  );
+
+  const errors = validateFormulaInput({
+    name: "Remix Standard",
+    type: "remix",
+    yieldMl: 100,
+    components: [
+      {
+        productId: OIL_BASE_PRODUCT_ID,
+        productName: "Selected Oil Blend",
+        qty: 18,
+        unit: "ml",
+      },
+      {
+        productId: "1",
+        productName: "Ethanol 96%",
+        qty: 82,
+        unit: "ml",
+      },
+    ],
+  });
+  assert.ok(errors.some((e) => /oil-base must be 20 ml/i.test(e)));
 });
 
 test("empty formula → Formula missing", () => {

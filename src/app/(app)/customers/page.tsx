@@ -171,9 +171,25 @@ export default function CustomersPage() {
                     key={f.id}
                     className="rounded-lg border border-line/70 bg-mist/30 px-3 py-2 text-sm"
                   >
-                    <p className="font-medium">{f.name}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium">{f.name}</p>
+                      <Badge
+                        tone={
+                          f.status === "approved"
+                            ? "success"
+                            : f.status === "rejected"
+                              ? "danger"
+                              : f.status === "archived"
+                                ? "neutral"
+                                : "warning"
+                        }
+                      >
+                        {f.status || "draft"}
+                      </Badge>
+                    </div>
                     <p className="text-[11px] text-ink-muted">
-                      {f.components.length} components · {f.yieldMl} ml
+                      {f.components.length} components · {f.yieldMl} ml · v
+                      {f.version || 1}
                     </p>
                   </li>
                 ))}

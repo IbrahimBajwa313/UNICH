@@ -102,7 +102,7 @@ export function validateImportRows(
 
     const unit = row.unit as StockUnit;
     if (row.unit && !STOCK_UNITS.includes(unit)) {
-      errors.push(`Invalid Unit: ${row.unit} (use ml or pcs)`);
+      errors.push(`Invalid Unit: ${row.unit} (use ml, pcs, g, or kg)`);
     }
 
     if (

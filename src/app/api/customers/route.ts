@@ -3,6 +3,10 @@ import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function mapCustomer(c: Record<string, unknown>) {
   return {
     ...c,
@@ -19,10 +23,17 @@ export async function GET(req: Request) {
     const q = searchParams.get("q")?.trim();
     const filter: Record<string, unknown> = {};
     if (q) {
-      filter.$or = [
-        { name: { $regex: q, $options: "i" } },
-        { phone: { $regex: q, $options: "i" } },
+      const safe = escapeRegex(q);
+      const digits = q.replace(/\D/g, "");
+      const or: Record<string, unknown>[] = [
+        { name: { $regex: safe, $options: "i" } },
+        { phone: { $regex: safe, $options: "i" } },
       ];
+      // Match phones saved with/without +, spaces, or country code extras.
+      if (digits.length >= 7) {
+        or.push({ phone: { $regex: escapeRegex(digits) } });
+      }
+      filter.$or = or;
     }
     const customers = await Customer.find(filter).sort({ name: 1 });
     return NextResponse.json(toJSONList(customers).map(mapCustomer));

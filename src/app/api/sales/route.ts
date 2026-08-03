@@ -29,10 +29,25 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const limit = Number(searchParams.get("limit") || 20);
     const status = searchParams.get("status") || "completed";
-    const filter =
+    const phone = searchParams.get("phone")?.trim();
+    const customerId = searchParams.get("customerId")?.trim();
+    const filter: Record<string, unknown> =
       status === "all"
         ? {}
         : { status: status as "completed" | "held" | "void" };
+    if (customerId) {
+      filter.customerId = customerId;
+    } else if (phone) {
+      const digits = phone.replace(/\D/g, "");
+      if (digits.length >= 7) {
+        // Escape regex metacharacters (e.g. leading + in +971…)
+        const safeDigits = digits.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        filter.customerPhone = { $regex: safeDigits };
+      } else {
+        const safe = phone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        filter.customerPhone = { $regex: safe, $options: "i" };
+      }
+    }
     const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
       .limit(limit)

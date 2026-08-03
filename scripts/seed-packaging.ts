@@ -211,6 +211,51 @@ const extras = [
     itemType: "packaging",
   },
   {
+    sku: "LBL-STD",
+    name: "Label — Standard",
+    category: "Packaging",
+    unit: "pcs",
+    sellPrice: 1.5,
+    minMarginPct: 20,
+    costFifo: 0.35,
+    stockSellable: 800,
+    stockTester: 0,
+    stockSample: 0,
+    stockPersonal: 0,
+    lowStockAt: 100,
+    itemType: "packaging",
+  },
+  {
+    sku: "LBL-PRM",
+    name: "Label — Premium Foil",
+    category: "Packaging",
+    unit: "pcs",
+    sellPrice: 2.5,
+    minMarginPct: 25,
+    costFifo: 0.7,
+    stockSellable: 400,
+    stockTester: 0,
+    stockSample: 0,
+    stockPersonal: 0,
+    lowStockAt: 60,
+    itemType: "packaging",
+  },
+  {
+    sku: "BOX-STD",
+    name: "Carton Box — Standard",
+    category: "Packaging",
+    unit: "pcs",
+    sellPrice: 3,
+    minMarginPct: 20,
+    costFifo: 0.9,
+    stockSellable: 320,
+    stockTester: 0,
+    stockSample: 0,
+    stockPersonal: 0,
+    lowStockAt: 50,
+    itemType: "packaging",
+  },
+  {
     sku: "FIX-PRM",
     name: "Fixative — Premium",
     category: "Packaging",
@@ -266,7 +311,9 @@ async function main() {
     console.log(`+ ${p.sku} ${p.name}`);
   }
 
-  const packaging = await Product.find({ category: "Packaging" }).lean();
+  const packaging = await Product.find({
+    category: { $in: ["Packaging", "Gift Boxes"] },
+  }).lean();
   const byRole: Record<string, string[]> = {};
   for (const p of packaging) {
     const role =

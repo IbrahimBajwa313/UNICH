@@ -19,7 +19,7 @@ export const PRODUCT_CATEGORIES: ProductCategory[] = [
   "Packaging",
 ];
 
-export const STOCK_UNITS: StockUnit[] = ["ml", "pcs"];
+export const STOCK_UNITS: StockUnit[] = ["ml", "pcs", "g", "kg"];
 
 export const CONCENTRATIONS: Concentration[] = [
   "EDT",

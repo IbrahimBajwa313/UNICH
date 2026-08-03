@@ -10,7 +10,12 @@ export function useApiData<T>(url: string | null) {
 
   const reload = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!url) return;
+      if (!url) {
+        setData(null);
+        setLoading(false);
+        setError(null);
+        return;
+      }
       const silent = Boolean(opts?.silent);
       if (!silent) {
         setLoading(true);

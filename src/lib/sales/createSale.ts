@@ -215,6 +215,7 @@ async function holdSale(input: CreateSaleInput) {
       oilProductId: raw.oilProductId,
       oilMl: raw.oilMl,
       packagingProductIds: raw.packagingProductIds,
+      formulaId: raw.formulaId,
     });
     subtotal += qty * unitPrice;
   }

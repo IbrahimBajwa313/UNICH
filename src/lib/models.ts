@@ -6,7 +6,7 @@ const ProductSchema = new Schema(
     name: { type: String, required: true, trim: true },
     nameAr: String,
     category: { type: String, required: true },
-    unit: { type: String, enum: ["pcs", "ml"], required: true },
+    unit: { type: String, enum: ["pcs", "ml", "g", "kg"], required: true },
     sellPrice: { type: Number, required: true, default: 0 },
     wholesalePrice: { type: Number, default: 0 },
     minMarginPct: { type: Number, required: true, default: 0 },
@@ -81,8 +81,47 @@ const FormulaComponentSchema = new Schema(
   {
     productId: { type: String, required: true },
     productName: { type: String, required: true },
-    qty: { type: Number, required: true },
-    unit: { type: String, enum: ["pcs", "ml"], required: true },
+    qty: { type: Number, required: true, min: 0 },
+    unit: { type: String, enum: ["pcs", "ml", "g", "kg"], required: true },
+  },
+  { _id: false },
+);
+
+const FormulaAuditSchema = new Schema(
+  {
+    at: { type: Date, required: true },
+    by: String,
+    action: {
+      type: String,
+      enum: ["created", "updated", "status_changed", "restored"],
+      required: true,
+    },
+    detail: String,
+    fromStatus: String,
+    toStatus: String,
+    fromVersion: Number,
+    toVersion: Number,
+  },
+  { _id: false },
+);
+
+const FormulaVersionSchema = new Schema(
+  {
+    version: { type: Number, required: true },
+    name: { type: String, required: true },
+    type: { type: String, enum: ["remix", "oil", "bakhoor"], required: true },
+    status: {
+      type: String,
+      enum: ["draft", "approved", "rejected", "archived"],
+      required: true,
+    },
+    customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
+    customerName: String,
+    yieldMl: { type: Number, required: true },
+    components: [FormulaComponentSchema],
+    notes: String,
+    savedAt: { type: Date, required: true },
+    savedBy: String,
   },
   { _id: false },
 );
@@ -90,12 +129,22 @@ const FormulaComponentSchema = new Schema(
 const FormulaSchema = new Schema(
   {
     name: { type: String, required: true },
-    type: { type: String, enum: ["remix", "custom", "signature"], required: true },
+    type: { type: String, enum: ["remix", "oil", "bakhoor"], required: true },
+    status: {
+      type: String,
+      enum: ["draft", "approved", "rejected", "archived"],
+      default: "draft",
+    },
+    version: { type: Number, required: true, default: 1, min: 1 },
+    versions: { type: [FormulaVersionSchema], default: [] },
+    history: { type: [FormulaAuditSchema], default: [] },
     customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
     customerName: String,
     yieldMl: { type: Number, required: true },
     components: [FormulaComponentSchema],
     notes: String,
+    approvedAt: Date,
+    approvedBy: String,
   },
   { timestamps: true },
 );
@@ -168,6 +217,7 @@ const SaleLineSchema = new Schema(
     deductMl: Number,
     oilProductId: { type: Schema.Types.ObjectId, ref: "Product" },
     oilMl: Number,
+    formulaId: { type: Schema.Types.ObjectId, ref: "Formula" },
     packagingProductIds: [{ type: Schema.Types.ObjectId, ref: "Product" }],
   },
   { _id: false },

@@ -4,6 +4,8 @@ export const REMIX_REQUIRED_ROLES = [
   "cap",
   "atomizer",
   "collar",
+  "label",
+  "box",
   "ethanol",
   "fixative",
 ] as const;
@@ -12,11 +14,16 @@ export type RemixRequiredRole = (typeof REMIX_REQUIRED_ROLES)[number];
 
 export const OIL_BASE_PRODUCT_ID = "oil-base";
 
+/** BLD-02 / BLD-03: remix always consumes a fixed 20 ml of selected oil (not tola). */
+export const REMIX_OIL_ML = 20;
+
 const ROLE_PATTERNS: Record<RemixRequiredRole, RegExp[]> = {
   bottle: [/\bbottle\b/i, /^BOT-/i],
   cap: [/\bcap\b/i, /^CAP-/i],
   atomizer: [/\batomizer\b/i, /^ATM-/i],
   collar: [/\bcollar\b/i, /^COL-/i],
+  label: [/\blabel\b/i, /^LBL-/i],
+  box: [/\bbox\b/i, /^BOX-/i, /^GB-/i],
   ethanol: [/\bethanol\b/i, /^ETH-/i],
   fixative: [/\bfixative\b/i, /^FIX-/i],
 };
