@@ -17,6 +17,23 @@ export const OIL_BASE_PRODUCT_ID = "oil-base";
 /** BLD-02 / BLD-03: remix always consumes a fixed 20 ml of selected oil (not tola). */
 export const REMIX_OIL_ML = 20;
 
+/**
+ * BLD-09: customer-supplied refill bottles are accepted only at 100 ml.
+ * Soft UI defaults are not enough — sale validation must enforce this.
+ */
+export const REFILL_CUSTOMER_BOTTLE_ML = 100;
+
+/** Backend-owned refill service rate (AED per ml). */
+export const REFILL_AED_PER_ML = 1.2;
+
+/** BLD-09 refill accessories the customer is charged for (bottle is customer-supplied). */
+export const REFILL_CHARGEABLE_PACKAGING_ROLES = [
+  "atomizer",
+  "collar",
+  "cap",
+  "pouch",
+] as const;
+
 const ROLE_PATTERNS: Record<RemixRequiredRole, RegExp[]> = {
   bottle: [/\bbottle\b/i, /^BOT-/i],
   cap: [/\bcap\b/i, /^CAP-/i],

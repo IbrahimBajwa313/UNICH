@@ -8,6 +8,10 @@ import {
 } from "@/lib/inventory";
 import { Product, ProductionOrder, Supplier } from "@/lib/models";
 import { planProduction } from "@/lib/production/planProduction";
+import {
+  assertYieldWithinTolerance,
+  type YieldVarianceResult,
+} from "@/lib/production/yieldVariance";
 import { SaleError } from "@/lib/sales/errors";
 
 const PRODUCTION_SUPPLIER_NAME = "In-house Production";
@@ -35,12 +39,29 @@ function newBatchNumber() {
   return `PB-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
+function applyYieldFields(
+  order: {
+    actualYieldMl?: number;
+    varianceMl?: number;
+    wastageMl?: number;
+    withinTolerance?: boolean;
+  },
+  yieldInfo: YieldVarianceResult,
+) {
+  order.actualYieldMl = yieldInfo.actualYieldMl;
+  order.varianceMl = yieldInfo.varianceMl;
+  order.wastageMl = yieldInfo.wastageMl;
+  order.withinTolerance = yieldInfo.withinTolerance;
+}
+
 export type CreateProductionInput = {
   formulaId: string;
   qty: number;
   oilProductId?: string;
   outputProductId: string;
   outputQty?: number;
+  /** BLD-06: required when complete=true. */
+  actualYieldMl?: number;
   notes?: string;
   createdBy?: string;
   /** If true, consume materials + create finished batch immediately. */
@@ -49,7 +70,7 @@ export type CreateProductionInput = {
 
 /**
  * Create a production order (draft) and optionally complete it.
- * Complete path: FIFO-consume planned materials → create production batch FIFO layer.
+ * Complete path: BLD-06 yield check → FIFO-consume planned materials → finished batch.
  */
 export async function createProductionOrder(input: CreateProductionInput) {
   const plan = await planProduction({
@@ -73,10 +94,21 @@ export async function createProductionOrder(input: CreateProductionInput) {
     throw new SaleError("PRODUCT_NOT_FOUND", "Output product not found");
   }
 
-  const outputQty =
+  const expectedYieldMl = plan.yieldMl * plan.qty;
+
+  let outputQty =
     input.outputQty !== undefined && Number(input.outputQty) > 0
       ? Number(input.outputQty)
       : plan.defaultOutputQty(output.unit);
+
+  // When completing with ml/g output, stock qty follows actual yield (BLD-06).
+  if (
+    input.complete &&
+    input.actualYieldMl !== undefined &&
+    (output.unit === "ml" || output.unit === "g")
+  ) {
+    outputQty = Number(input.actualYieldMl);
+  }
 
   if (!(outputQty > 0)) {
     throw new SaleError("VALIDATION", "Output qty must be greater than 0");
@@ -89,7 +121,7 @@ export async function createProductionOrder(input: CreateProductionInput) {
     formulaType: plan.formulaType,
     formulaVersion: plan.formulaVersion,
     qty: plan.qty,
-    yieldMl: plan.yieldMl * plan.qty,
+    yieldMl: expectedYieldMl,
     status: "draft",
     oilProductId: plan.oilProductId,
     oilProductName: plan.oilProductName,
@@ -114,6 +146,7 @@ export async function createProductionOrder(input: CreateProductionInput) {
   if (input.complete) {
     return completeProductionOrder(String(order._id), {
       completedBy: input.createdBy,
+      actualYieldMl: input.actualYieldMl,
     });
   }
 
@@ -122,7 +155,7 @@ export async function createProductionOrder(input: CreateProductionInput) {
 
 export async function completeProductionOrder(
   orderId: string,
-  opts: { completedBy?: string } = {},
+  opts: { completedBy?: string; actualYieldMl?: number } = {},
 ) {
   if (!mongoose.isValidObjectId(orderId)) {
     throw new SaleError("VALIDATION", "Invalid production order id");
@@ -137,6 +170,35 @@ export async function completeProductionOrder(
   }
   if (order.status === "cancelled") {
     throw new SaleError("VALIDATION", "Cancelled production orders cannot be completed");
+  }
+
+  // BLD-06: require actual yield and enforce ±5 ml tolerance
+  if (opts.actualYieldMl === undefined || opts.actualYieldMl === null) {
+    throw new SaleError(
+      "VALIDATION",
+      "Actual yield (ml) is required to complete production (BLD-06 ±5 ml)",
+    );
+  }
+
+  let yieldInfo: YieldVarianceResult;
+  try {
+    yieldInfo = assertYieldWithinTolerance(
+      Number(order.yieldMl),
+      Number(opts.actualYieldMl),
+    );
+  } catch (err) {
+    throw new SaleError(
+      "VALIDATION",
+      err instanceof Error ? err.message : "Yield variance out of tolerance",
+    );
+  }
+
+  applyYieldFields(order, yieldInfo);
+
+  // ml/g finished goods: stock added equals actual yield
+  const unit = String(order.outputUnit || "");
+  if (unit === "ml" || unit === "g") {
+    order.outputQty = yieldInfo.actualYieldMl;
   }
 
   const needs = order.plannedLines.map((l) => ({

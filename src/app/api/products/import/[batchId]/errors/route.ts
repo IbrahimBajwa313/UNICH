@@ -3,13 +3,17 @@ import { connectDB } from "@/lib/db";
 import type { ExcelProductRow } from "@/lib/excel/columns";
 import { buildErrorReport } from "@/lib/excel/errorReport";
 import { ImportBatch } from "@/lib/models";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ batchId: string }> };
 
-export async function GET(_: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { batchId } = await ctx.params;
     const batch = await ImportBatch.findOne({ batchId }).lean();

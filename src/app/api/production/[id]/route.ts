@@ -8,11 +8,15 @@ import { mapProductionOrder } from "@/lib/production/mapProduction";
 import { SaleError } from "@/lib/sales/errors";
 import { ProductionOrder } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 
@@ -42,6 +46,9 @@ export async function GET(req: Request, ctx: Ctx) {
 /** Cancel a draft production order (completed orders cannot be deleted). */
 export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 

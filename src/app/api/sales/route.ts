@@ -5,6 +5,7 @@ import { createSale } from "@/lib/sales/createSale";
 import { SaleError } from "@/lib/sales/errors";
 import { warmSaleCaches } from "@/lib/sales/validateSale";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 function mapSale(s: Record<string, unknown>) {
   const createdAt = s.createdAt ? new Date(s.createdAt as string) : new Date();
@@ -26,6 +27,9 @@ function mapSale(s: Record<string, unknown>) {
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     // Warm formula cache on POS boot (held-bills fetch) — first complete stays fast.
     void warmSaleCaches().catch(() => {
@@ -40,6 +44,18 @@ export async function GET(req: Request) {
       status === "all"
         ? {}
         : { status: status as "completed" | "held" | "void" };
+    if (
+      access &&
+      "role" in access &&
+      access.role !== "super_admin" &&
+      access.branchId
+    ) {
+      filter.$or = [
+        { branchId: access.branchId },
+        { branchId: null },
+        { branchId: { $exists: false } },
+      ];
+    }
     if (customerId) {
       filter.customerId = customerId;
     } else if (phone) {
@@ -68,6 +84,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const body = await req.json();
     const headerKey = req.headers.get("idempotency-key") || undefined;
     const { sale, deduplicated, timingMs } = await createSale({
@@ -79,6 +98,8 @@ export async function POST(req: Request) {
       lines: body.lines,
       status: body.status,
       idempotencyKey: body.idempotencyKey || headerKey,
+      branchId: access?.branchId ?? undefined,
+      branchName: access?.branchName ?? undefined,
     });
 
     const payload = { ...mapSale(toJSON(sale)!), deduplicated, timingMs };

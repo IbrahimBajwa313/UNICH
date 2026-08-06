@@ -3,9 +3,13 @@ import { connectDB } from "@/lib/db";
 import { FifoLayer } from "@/lib/models";
 import { addFifoLayer } from "@/lib/inventory";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const productId = searchParams.get("productId");
@@ -36,6 +40,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
     const layer = await addFifoLayer({

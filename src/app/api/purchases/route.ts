@@ -7,6 +7,7 @@ import {
   syncReceivedQtys,
 } from "@/lib/purchases/applyFifoFromPurchase";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 function mapLine(l: Record<string, unknown>) {
   return {
@@ -54,8 +55,11 @@ function normalizeLines(raw: LineBody[] | undefined) {
     .filter((l) => l.productId && l.qtyOrdered > 0);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const purchases = await PurchaseOrder.find().sort({ date: -1 });
     return NextResponse.json(toJSONList(purchases).map(mapPO));
@@ -69,6 +73,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
     const lines = normalizeLines(body.lines);
@@ -95,6 +102,8 @@ export async function POST(req: Request) {
       total,
       itemCount,
       lines,
+      branchId: access?.branchId ?? undefined,
+      branchName: access?.branchName ?? undefined,
     });
 
     // Goods receipt → FIFO layers + costFifo refresh (via addFifoLayer)

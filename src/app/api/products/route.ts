@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { defaultLowStockAt } from "@/lib/inventory/stockCheck";
 import { Product } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim();
@@ -30,8 +35,24 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
+    // ALT-01: apply default low-stock thresholds when omitted
+    if (
+      body.lowStockAt === undefined ||
+      body.lowStockAt === null ||
+      body.lowStockAt === ""
+    ) {
+      body.lowStockAt = defaultLowStockAt({
+        unit: String(body.unit || "pcs"),
+        category: body.category,
+        itemType: body.itemType,
+        name: body.name,
+      });
+    }
     const product = await Product.create(body);
     return NextResponse.json(toJSON(product), { status: 201 });
   } catch (error) {

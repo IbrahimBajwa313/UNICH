@@ -2,11 +2,15 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await ctx.params;
     const customer = await Customer.findById(id);
@@ -30,6 +34,9 @@ export async function GET(_: Request, ctx: Ctx) {
 
 export async function PUT(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await ctx.params;
     const body = await req.json();
@@ -50,8 +57,11 @@ export async function PUT(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await ctx.params;
     const customer = await Customer.findByIdAndDelete(id);

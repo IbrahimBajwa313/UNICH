@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Expense, Product, Sale } from "@/lib/models";
 import { moduleRoadmap } from "@/lib/constants";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
 
     const startOfToday = new Date();

@@ -3,6 +3,8 @@ import { resolveDeductMlFromUnitLabel } from "@/lib/format";
 import { Formula, Product } from "@/lib/models";
 import {
   OIL_BASE_PRODUCT_ID,
+  REFILL_AED_PER_ML,
+  REFILL_CUSTOMER_BOTTLE_ML,
   REMIX_OIL_ML,
   REMIX_REQUIRED_ROLES,
   matchRemixRole,
@@ -644,10 +646,16 @@ export async function validateSaleLines(
           "Refill quantity (ml) is required — use a label like 100ml refill",
         );
       }
+      // BLD-09: customer bottle accepted ONLY at 100ml (hard rule, not UI default)
+      if (deductMl !== REFILL_CUSTOMER_BOTTLE_ML) {
+        throw new SaleError(
+          "INVALID_LINE",
+          `Refill accepts only ${REFILL_CUSTOMER_BOTTLE_ML}ml customer bottles (got ${deductMl}ml)`,
+        );
+      }
       // Backend-owned refill service rate (AED per ml) — do not trust client unitPrice
-      const REFILL_AED_PER_ML = 1.2;
       const unitPrice = Number((REFILL_AED_PER_ML * deductMl).toFixed(3));
-      const unitLabel = raw.unitLabel?.trim() || `${deductMl}ml refill`;
+      const unitLabel = `${REFILL_CUSTOMER_BOTTLE_ML}ml refill`;
 
       lines.push({
         productId: raw.productId,
@@ -776,65 +784,33 @@ export async function validateSaleLines(
 /**
  * Verify every planned deduction has enough sellable + FIFO stock (read-only).
  * Not used on the hot POS path — deductFifo enforces atomically (saves ~1 RTT).
- * Available for admin tools / preflight checks.
+ * Available for admin tools / preflight checks. Uses shared INV-06 stock check.
  */
 export async function assertStockAvailable(deductions: DeductionNeed[]) {
-  const totals = new Map<string, { qty: number; name: string }>();
-  for (const d of deductions) {
-    const cur = totals.get(d.productId) || { qty: 0, name: d.productName };
-    cur.qty += d.qty;
-    cur.name = d.productName;
-    totals.set(d.productId, cur);
-  }
+  const { checkStockAvailability } = await import("@/lib/inventory/stockCheck");
+  const result = await checkStockAvailability(
+    deductions.map((d) => ({
+      productId: d.productId,
+      qty: d.qty,
+      productName: d.productName,
+    })),
+  );
 
-  if (totals.size === 0) return;
-
-  const { FifoLayer } = await import("@/lib/models");
-  const ids = [...totals.keys()];
-
-  const [products, fifoRows] = await Promise.all([
-    Product.find({ _id: { $in: ids } })
-      .select("name stockSellable")
-      .lean<
-        Array<{
-          _id: mongoose.Types.ObjectId;
-          name: string;
-          stockSellable: number;
-        }>
-      >(),
-    FifoLayer.aggregate<{ _id: mongoose.Types.ObjectId; total: number }>([
-      {
-        $match: {
-          productId: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) },
-          qtyRemaining: { $gt: 0 },
-        },
-      },
-      { $group: { _id: "$productId", total: { $sum: "$qtyRemaining" } } },
-    ]),
-  ]);
-
-  const productById = new Map(products.map((p) => [String(p._id), p]));
-  const fifoById = new Map(fifoRows.map((r) => [String(r._id), r.total]));
-
-  for (const [productId, { qty, name }] of totals) {
-    const product = productById.get(productId);
-    if (!product) {
-      throw new SaleError("PRODUCT_NOT_FOUND", `Product not found: ${name}`);
+  for (const s of result.shortages) {
+    if (s.missing) {
+      throw new SaleError("PRODUCT_NOT_FOUND", `Product not found: ${s.productName}`);
     }
-    if (product.stockSellable < qty) {
+    if (!s.short) continue;
+    if (s.fifoAvailable < s.need && s.available >= s.need) {
       throw new SaleError(
         "INSUFFICIENT_STOCK",
-        `Insufficient stock for ${product.name} (need ${qty}, have ${product.stockSellable})`,
+        `Insufficient stock for ${s.productName} (FIFO need ${s.need}, have ${s.fifoAvailable})`,
       );
     }
-
-    const fifoTotal = fifoById.get(productId) ?? 0;
-    if (fifoTotal < qty) {
-      throw new SaleError(
-        "INSUFFICIENT_STOCK",
-        `Insufficient stock for ${product.name} (FIFO need ${qty}, have ${fifoTotal})`,
-      );
-    }
+    throw new SaleError(
+      "INSUFFICIENT_STOCK",
+      `Insufficient stock for ${s.productName} (need ${s.need}, have ${s.available})`,
+    );
   }
 }
 

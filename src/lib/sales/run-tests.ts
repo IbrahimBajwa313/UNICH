@@ -10,10 +10,15 @@ import {
   REMIX_REQUIRED_ROLES,
   OIL_BASE_PRODUCT_ID,
   REMIX_OIL_ML,
+  REFILL_CUSTOMER_BOTTLE_ML,
   roleLabel,
 } from "./constants";
 import { validateFormulaInput } from "../formulas/validateFormula";
 import { SaleError } from "./errors";
+import {
+  defaultLowStockAt,
+  warnIfNegativeStock,
+} from "../inventory/stockCheck";
 
 let passed = 0;
 let failed = 0;
@@ -227,6 +232,43 @@ test("¼ Tola → 3 ml", () => {
 test("100ml refill label → 100", () => {
   assert.equal(resolveDeductMlFromUnitLabel("100ml refill"), 100);
   assert.equal(resolveDeductMlFromUnitLabel("50 ml"), 50);
+});
+
+test("BLD-09 refill bottle size is hard-locked to 100ml", () => {
+  assert.equal(REFILL_CUSTOMER_BOTTLE_ML, 100);
+  const fifty = resolveDeductMlFromUnitLabel("50ml refill");
+  const twoHundred = resolveDeductMlFromUnitLabel("200ml refill");
+  assert.equal(fifty, 50);
+  assert.equal(twoHundred, 200);
+  // Sale path must reject anything other than REFILL_CUSTOMER_BOTTLE_ML
+  assert.notEqual(fifty, REFILL_CUSTOMER_BOTTLE_ML);
+  assert.notEqual(twoHundred, REFILL_CUSTOMER_BOTTLE_ML);
+  assert.equal(
+    resolveDeductMlFromUnitLabel("100ml refill"),
+    REFILL_CUSTOMER_BOTTLE_ML,
+  );
+});
+
+test("INV-06 negative stock warning copy", () => {
+  const w = warnIfNegativeStock("Oud Oil", -12);
+  assert.ok(w);
+  assert.match(w!, /Stock warning/);
+  assert.match(w!, /restock or reorder/);
+  assert.equal(warnIfNegativeStock("Oud Oil", 0), null);
+  assert.equal(warnIfNegativeStock("Oud Oil", 5), null);
+});
+
+test("ALT-01 default low-stock thresholds", () => {
+  assert.equal(defaultLowStockAt({ unit: "pcs" }), 5);
+  assert.equal(defaultLowStockAt({ unit: "ml", name: "Oud Cambodi Oil" }), 100);
+  assert.equal(
+    defaultLowStockAt({ unit: "ml", itemType: "raw", name: "Rose Note" }),
+    5,
+  );
+  assert.equal(
+    defaultLowStockAt({ unit: "ml", category: "Notes", name: "Amber" }),
+    5,
+  );
 });
 
 test("missing / garbage label → null (sale must stop)", () => {

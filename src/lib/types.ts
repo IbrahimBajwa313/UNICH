@@ -5,6 +5,38 @@ export type UserRole =
   | "accountant"
   | "inventory";
 
+/** BRN-08 branch (multi-store). */
+export type Branch = {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+/** BRN-08 system user (role + branch assignment). */
+export type AppUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  roleLabel: string;
+  branchId: string | null;
+  branchName: string | null;
+  active: boolean;
+  lastLoginAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+/** Public session payload (never includes password). */
+export type AuthMe = {
+  authenticated: boolean;
+  user: AppUser | null;
+  permissions: string[];
+};
+
 export type ProductCategory =
   | "Brand Perfumes"
   | "Signature Brand"
@@ -255,6 +287,11 @@ export interface ProductionPlannedLine {
   qty: number;
   unit: StockUnit | string;
   reason: string;
+  /** INV-06 preview fields (production plan only). */
+  stockAvailable?: number;
+  fifoAvailable?: number;
+  stockShort?: boolean;
+  stockWarning?: string;
 }
 
 export interface ProductionConsumptionLine {
@@ -292,7 +329,16 @@ export interface ProductionOrder {
   formulaType: FormulaType;
   formulaVersion: number;
   qty: number;
+  /** BLD-06 expected yield (formula.yieldMl × qty). */
   yieldMl: number;
+  /** BLD-06 actual measured yield on complete. */
+  actualYieldMl?: number;
+  /** BLD-06: actual − expected. */
+  varianceMl?: number;
+  /** BLD-06: shortfall when actual < expected. */
+  wastageMl?: number;
+  /** BLD-06: |variance| ≤ ±5 ml. */
+  withinTolerance?: boolean;
   status: ProductionOrderStatus;
   oilProductId?: string;
   oilProductName?: string;
@@ -312,6 +358,15 @@ export interface ProductionOrder {
   createdAt?: string;
   updatedAt?: string;
 }
+
+/** INV-07 wastage liability on inventory adjustments. */
+export type WastageLiability = "cost" | "customer_paid";
+
+export type InventoryAdjustmentReason =
+  | "wastage_cost"
+  | "wastage_customer"
+  | "restock"
+  | "adjustment";
 
 export interface Quotation {
   id: string;

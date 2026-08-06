@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -18,6 +19,9 @@ function mapCustomer(c: Record<string, unknown>) {
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim();
@@ -47,6 +51,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
     const customer = await Customer.create({

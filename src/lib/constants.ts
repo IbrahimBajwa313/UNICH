@@ -7,7 +7,7 @@ export const moduleRoadmap = [
   { name: "CRM", status: "live" as const, priority: 6 },
   { name: "Quotations", status: "live" as const, priority: 7 },
   { name: "Reporting", status: "live" as const, priority: 8 },
-  { name: "RBAC & Security", status: "shell" as const, priority: 9 },
+  { name: "RBAC & Security", status: "live" as const, priority: 9 },
   { name: "Excel Import", status: "live" as const, priority: 10 },
   { name: "WhatsApp / Email", status: "live" as const, priority: 11 },
   { name: "Shopify", status: "planned" as const, priority: 12 },

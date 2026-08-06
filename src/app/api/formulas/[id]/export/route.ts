@@ -9,6 +9,7 @@ import { mapFormula } from "@/lib/formulas/mapFormula";
 import { Formula } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
 import type { Formula as FormulaType } from "@/lib/types";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,6 +20,9 @@ type Ctx = { params: Promise<{ id: string }> };
  */
 export async function GET(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 

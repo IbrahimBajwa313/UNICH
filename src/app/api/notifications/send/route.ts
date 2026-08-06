@@ -16,6 +16,7 @@ import { renderReceiptHtml } from "@/lib/receipt/template";
 import { receiptSmsText, receiptText } from "@/lib/receipt/text";
 import type { ReceiptLine } from "@/lib/receipt/types";
 import type { DeliveryKind } from "@/lib/types";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Channel = "email" | "whatsapp" | "sms";
 type LegacyChannel = Channel | "both";
@@ -104,6 +105,9 @@ async function findCustomerByPhone(phone: string) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const body = (await req.json()) as Body;
     const channels = resolveChannels(body);
     const kind: DeliveryKind = body.kind || "custom";

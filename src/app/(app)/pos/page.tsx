@@ -352,7 +352,7 @@ export default function PosPage() {
           unitLabel: product.unit,
           unitPrice: product.sellPrice,
           lineType: "packaging" as const,
-          bomNote: "Optional refill packaging",
+          bomNote: "Refill packaging (BLD-09 charge: cap/atomizer/collar/pouch)",
         },
       ];
     });
@@ -714,6 +714,7 @@ export default function PosPage() {
     if (!oil) {
       return flash("Oil not selected — pick oil for refill", 5000, "err");
     }
+    // BLD-09: customer bottle locked to 100ml only (backend also enforces)
     setCart((prev) => [
       ...prev,
       {
@@ -724,10 +725,11 @@ export default function PosPage() {
         unitPrice: 120,
         lineType: "refill",
         deductMl: 100,
-        bomNote: "Customer bottle · add Cap/Atomizer/etc. as packaging lines",
+        bomNote:
+          "Customer 100ml bottle only · charge Cap/Atomizer/Collar/Pouch as packaging",
       },
     ]);
-    flash("Refill 100ml — add optional packaging below if needed");
+    flash("Refill locked to 100ml customer bottle — add Cap/Atomizer/Collar/Pouch to charge");
   }
 
   function updateQty(key: string, delta: number) {
@@ -778,6 +780,15 @@ export default function PosPage() {
     );
     if (missingOil) {
       flash("Oil not selected for remix line", 5000, "err");
+      return;
+    }
+    const badRefill = cart.find(
+      (l) =>
+        l.lineType === "refill" &&
+        (l.deductMl !== 100 || !/100\s*ml/i.test(l.unitLabel || "")),
+    );
+    if (badRefill) {
+      flash("Refill accepts only 100ml customer bottles (BLD-09)", 6000, "err");
       return;
     }
     setCheckingOut(true);

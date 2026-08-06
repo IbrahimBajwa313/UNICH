@@ -7,6 +7,7 @@ import {
   type ExistingProductRef,
 } from "@/lib/excel/validate";
 import { AppSettings, ImportBatch, Product } from "@/lib/models";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,9 @@ function mapExisting(p: {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const form = await req.formData();
     const file = form.get("file");

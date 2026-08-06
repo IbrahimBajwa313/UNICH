@@ -1,0 +1,207 @@
+import type { UserRole } from "@/lib/types";
+
+/** BRN-08 permission keys used by route + API guards. */
+export type Permission =
+  | "dashboard:read"
+  | "pos:read"
+  | "pos:write"
+  | "inventory:read"
+  | "inventory:write"
+  | "formulas:read"
+  | "formulas:write"
+  | "production:read"
+  | "production:write"
+  | "purchases:read"
+  | "purchases:write"
+  | "customers:read"
+  | "customers:write"
+  | "quotations:read"
+  | "quotations:write"
+  | "reports:read"
+  | "expenses:read"
+  | "expenses:write"
+  | "settings:read"
+  | "settings:write"
+  | "users:read"
+  | "users:write"
+  | "branches:read"
+  | "branches:write";
+
+export const ALL_PERMISSIONS: Permission[] = [
+  "dashboard:read",
+  "pos:read",
+  "pos:write",
+  "inventory:read",
+  "inventory:write",
+  "formulas:read",
+  "formulas:write",
+  "production:read",
+  "production:write",
+  "purchases:read",
+  "purchases:write",
+  "customers:read",
+  "customers:write",
+  "quotations:read",
+  "quotations:write",
+  "reports:read",
+  "expenses:read",
+  "expenses:write",
+  "settings:read",
+  "settings:write",
+  "users:read",
+  "users:write",
+  "branches:read",
+  "branches:write",
+];
+
+const SALES_PERMS: Permission[] = [
+  "dashboard:read",
+  "pos:read",
+  "pos:write",
+  "customers:read",
+  "customers:write",
+  "quotations:read",
+  "quotations:write",
+];
+
+const ACCOUNTANT_PERMS: Permission[] = [
+  "dashboard:read",
+  "reports:read",
+  "expenses:read",
+  "expenses:write",
+];
+
+const INVENTORY_PERMS: Permission[] = [
+  "dashboard:read",
+  "inventory:read",
+  "inventory:write",
+  "purchases:read",
+  "purchases:write",
+];
+
+/** Admin: ops + formulas + users (branch-scoped). Not full branch CRUD. */
+const ADMIN_PERMS: Permission[] = ALL_PERMISSIONS.filter(
+  (p) => p !== "branches:write",
+);
+
+export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+  super_admin: [...ALL_PERMISSIONS],
+  admin: ADMIN_PERMS,
+  sales: SALES_PERMS,
+  accountant: ACCOUNTANT_PERMS,
+  inventory: INVENTORY_PERMS,
+};
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  super_admin: "Super Admin",
+  admin: "Admin",
+  sales: "Sales Staff",
+  accountant: "Accountant",
+  inventory: "Inventory",
+};
+
+export const ASSIGNABLE_ROLES: UserRole[] = [
+  "super_admin",
+  "admin",
+  "sales",
+  "accountant",
+  "inventory",
+];
+
+/** App page → minimum permission to view. */
+export const ROUTE_PERMISSIONS: { prefix: string; permission: Permission }[] = [
+  { prefix: "/settings", permission: "settings:read" },
+  { prefix: "/playground", permission: "settings:read" },
+  { prefix: "/formulas", permission: "formulas:read" },
+  { prefix: "/production", permission: "production:read" },
+  { prefix: "/inventory", permission: "inventory:read" },
+  { prefix: "/purchases", permission: "purchases:read" },
+  { prefix: "/customers", permission: "customers:read" },
+  { prefix: "/quotations", permission: "quotations:read" },
+  { prefix: "/reports", permission: "reports:read" },
+  { prefix: "/expenses", permission: "expenses:read" },
+  { prefix: "/pos", permission: "pos:read" },
+  { prefix: "/", permission: "dashboard:read" },
+];
+
+/** API path prefix → permission (first match wins). */
+export const API_PERMISSIONS: { prefix: string; permission: Permission }[] = [
+  { prefix: "/api/users", permission: "users:read" },
+  { prefix: "/api/branches", permission: "branches:read" },
+  { prefix: "/api/settings", permission: "settings:read" },
+  { prefix: "/api/formulas", permission: "formulas:read" },
+  { prefix: "/api/production", permission: "production:read" },
+  { prefix: "/api/products", permission: "inventory:read" },
+  { prefix: "/api/inventory", permission: "inventory:read" },
+  { prefix: "/api/purchases", permission: "purchases:read" },
+  { prefix: "/api/suppliers", permission: "purchases:read" },
+  { prefix: "/api/customers", permission: "customers:read" },
+  { prefix: "/api/quotations", permission: "quotations:read" },
+  { prefix: "/api/sales", permission: "pos:read" },
+  { prefix: "/api/reports", permission: "reports:read" },
+  { prefix: "/api/expenses", permission: "expenses:read" },
+];
+
+export function permissionsForRole(role: UserRole): Permission[] {
+  return ROLE_PERMISSIONS[role] ?? [];
+}
+
+export function hasPermission(role: UserRole, permission: Permission): boolean {
+  return permissionsForRole(role).includes(permission);
+}
+
+export function hasAnyPermission(
+  role: UserRole,
+  permissions: Permission[],
+): boolean {
+  return permissions.some((p) => hasPermission(role, p));
+}
+
+export function permissionForPath(pathname: string): Permission | null {
+  const path = pathname.split("?")[0] || "/";
+  const sorted = [...ROUTE_PERMISSIONS].sort(
+    (a, b) => b.prefix.length - a.prefix.length,
+  );
+  for (const entry of sorted) {
+    if (entry.prefix === "/") {
+      if (path === "/" || path === "") return entry.permission;
+      continue;
+    }
+    if (path === entry.prefix || path.startsWith(`${entry.prefix}/`)) {
+      return entry.permission;
+    }
+  }
+  return null;
+}
+
+export function permissionForApiPath(pathname: string): Permission | null {
+  const path = pathname.split("?")[0] || "";
+  const sorted = [...API_PERMISSIONS].sort(
+    (a, b) => b.prefix.length - a.prefix.length,
+  );
+  for (const entry of sorted) {
+    if (path === entry.prefix || path.startsWith(`${entry.prefix}/`)) {
+      return entry.permission;
+    }
+  }
+  return null;
+}
+
+/** Nav hrefs visible for a role. */
+export function navAllowed(href: string, role: UserRole): boolean {
+  const perm = permissionForPath(href);
+  if (!perm) return true;
+  return hasPermission(role, perm);
+}
+
+export function isUserRole(value: unknown): value is UserRole {
+  return (
+    typeof value === "string" &&
+    (ASSIGNABLE_ROLES as string[]).includes(value)
+  );
+}
+
+/** Roles that may see all branches (no isolation filter). */
+export function canAccessAllBranches(role: UserRole): boolean {
+  return role === "super_admin";
+}

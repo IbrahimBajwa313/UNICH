@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { FifoLayer, ImportBatch, Product } from "@/lib/models";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ batchId: string }> };
 
-export async function POST(_: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { batchId } = await ctx.params;
 

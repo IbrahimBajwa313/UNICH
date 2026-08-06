@@ -14,6 +14,7 @@ import { Formula } from "@/lib/models";
 import type { FormulaComponent } from "@/lib/types";
 import { toJSON } from "@/lib/serialize";
 import { invalidateDefaultRemixCache } from "@/lib/sales/validateSale";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -53,6 +54,9 @@ function currentVersion(doc: Record<string, unknown>) {
 
 export async function PUT(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 
@@ -342,6 +346,9 @@ export async function PUT(req: Request, ctx: Ctx) {
 
 export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 

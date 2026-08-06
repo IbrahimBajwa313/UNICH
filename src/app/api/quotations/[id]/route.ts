@@ -2,11 +2,15 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Quotation, Sale } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await ctx.params;
     const body = await req.json();
@@ -28,8 +32,11 @@ export async function PUT(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await ctx.params;
     const quotation = await Quotation.findByIdAndDelete(id);
@@ -48,6 +55,9 @@ export async function DELETE(_: Request, ctx: Ctx) {
 /** Convert approved quotation into a sale record (no stock deduct until POS checkout path). */
 export async function POST(req: Request, ctx: Ctx) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await ctx.params;
     const body = await req.json().catch(() => ({}));
@@ -87,6 +97,8 @@ export async function POST(req: Request, ctx: Ctx) {
             lineType: "wholesale",
           },
         ],
+        branchId: access?.branchId ?? undefined,
+        branchName: access?.branchName ?? undefined,
       });
       quotation.convertedToSaleId = sale._id;
       await quotation.save();

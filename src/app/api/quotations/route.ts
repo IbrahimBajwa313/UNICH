@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Quotation } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 function mapQuote(q: Record<string, unknown>) {
   return {
@@ -15,6 +16,9 @@ function mapQuote(q: Record<string, unknown>) {
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
@@ -31,6 +35,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
     const count = await Quotation.countDocuments();
@@ -45,6 +52,8 @@ export async function POST(req: Request) {
         body.expiry || Date.now() + 14 * 24 * 60 * 60 * 1000,
       ),
       status: body.status || "draft",
+      branchId: access?.branchId ?? undefined,
+      branchName: access?.branchName ?? undefined,
     });
     return NextResponse.json(mapQuote(toJSON(quotation)!), { status: 201 });
   } catch (error) {

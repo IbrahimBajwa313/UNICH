@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/Button";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { UsersPanel } from "@/components/settings/UsersPanel";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { api } from "@/lib/api";
-import type { AppSettings } from "@/lib/types";
+import { ROLE_LABELS, ROLE_PERMISSIONS } from "@/lib/auth/roles";
+import type { AppSettings, UserRole } from "@/lib/types";
 
 function salespeopleFromDraft(draft: AppSettings) {
   return draft.salespeople?.length > 0
@@ -23,6 +26,7 @@ function activeFromDraft(draft: AppSettings, salespeople: string[]) {
 }
 
 export default function SettingsPage() {
+  const { hasPermission } = useAuth();
   const {
     data: draft,
     loading,
@@ -132,11 +136,13 @@ export default function SettingsPage() {
       <PageHeader
         eyebrow="System"
         title="Settings & RBAC"
-        description="Role-based access, bilingual invoices (EN + AR), 3 decimal precision, branch defaults, and integration stubs for Phase 1 go-live."
+        description="User roles (Admin / Sales / Accounting), branch assignment, bilingual invoices, and store defaults."
         actions={
-          <Button variant="gold" onClick={() => void save()}>
-            Save Settings
-          </Button>
+          hasPermission("settings:write") ? (
+            <Button variant="gold" onClick={() => void save()}>
+              Save Settings
+            </Button>
+          ) : null
         }
       />
 
@@ -146,25 +152,42 @@ export default function SettingsPage() {
         </div>
       ) : null}
 
+      <div className="mb-5">
+        <UsersPanel />
+      </div>
+
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel>
-          <PanelHeader title="Access Roles" subtitle="Fine-grained permissions" />
+          <PanelHeader
+            title="Access Roles"
+            subtitle="Enforced permissions (BRN-08)"
+          />
           <ul className="space-y-3">
-            {roles.map((r) => (
-              <li
-                key={r.role}
-                className="rounded-lg border border-line/70 bg-mist/30 px-3 py-3"
-              >
-                <p className="font-medium">{r.role}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {r.access.map((a) => (
-                    <Badge key={a} tone="neutral">
-                      {a}
-                    </Badge>
-                  ))}
-                </div>
-              </li>
-            ))}
+            {(Object.keys(ROLE_LABELS) as UserRole[]).map((roleKey) => {
+              const seeded = roles.find(
+                (r) => r.role === ROLE_LABELS[roleKey],
+              );
+              const perms = ROLE_PERMISSIONS[roleKey];
+              return (
+                <li
+                  key={roleKey}
+                  className="rounded-lg border border-line/70 bg-mist/30 px-3 py-3"
+                >
+                  <p className="font-medium">{ROLE_LABELS[roleKey]}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(seeded?.access?.length
+                      ? seeded.access
+                      : perms.slice(0, 6).map((p) => p.split(":")[0])
+                    ).map((a) => (
+                      <Badge key={a} tone="neutral">
+                        {a}
+                      </Badge>
+                    ))}
+                    <Badge tone="info">{perms.length} perms</Badge>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </Panel>
 

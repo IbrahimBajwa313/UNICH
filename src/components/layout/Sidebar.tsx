@@ -10,6 +10,7 @@ import {
   FileText,
   FlaskConical,
   LayoutDashboard,
+  LogOut,
   Settings,
   ShoppingCart,
   Truck,
@@ -18,7 +19,9 @@ import {
   Beaker,
 } from "lucide-react";
 import { clsx } from "@/lib/format";
-import { useApiData } from "@/components/ui/DataState";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { navAllowed } from "@/lib/auth/roles";
+import type { UserRole } from "@/lib/types";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -38,14 +41,29 @@ const nav = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { data: settings } = useApiData<{
-    branchName?: string;
-    currentUserName?: string;
-    currentUserRoleLabel?: string;
-  }>("/api/settings");
-  const branch = settings?.branchName || "Loading branch…";
-  const name = settings?.currentUserName || "Loading user…";
-  const role = settings?.currentUserRoleLabel || "";
+  const { user, logout, loading } = useAuth();
+  const role = (user?.role || "sales") as UserRole;
+  const branch = user?.branchName || (loading ? "…" : "No branch");
+  const name = user?.name || (loading ? "…" : "User");
+  const roleLabel = user?.roleLabel || "";
+
+  const visible = nav.filter((item) => navAllowed(item.href, role));
+  const ops = visible.filter((item) =>
+    [
+      "/",
+      "/pos",
+      "/inventory",
+      "/inventory/low-stock",
+      "/formulas",
+      "/production",
+      "/purchases",
+      "/customers",
+      "/quotations",
+    ].includes(item.href),
+  );
+  const insights = visible.filter(
+    (item) => !ops.some((o) => o.href === item.href),
+  );
 
   return (
     <aside className="relative flex h-full w-[268px] shrink-0 flex-col overflow-hidden border-r border-line/60 bg-sidebar text-ink-muted">
@@ -62,7 +80,8 @@ export function Sidebar() {
             <span
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-[0_0_20px_rgb(123_97_255_/_35%)]"
               style={{
-                background: "linear-gradient(135deg, #9b87ff 0%, #7b61ff 55%, #f5f5f7 140%)",
+                background:
+                  "linear-gradient(135deg, #9b87ff 0%, #7b61ff 55%, #f5f5f7 140%)",
               }}
             >
               U
@@ -88,7 +107,7 @@ export function Sidebar() {
           <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
             Operations
           </p>
-          {nav.slice(0, 9).map((item, i) => (
+          {ops.map((item, i) => (
             <NavItem
               key={item.href}
               {...item}
@@ -100,16 +119,20 @@ export function Sidebar() {
               delay={i}
             />
           ))}
-          <p className="mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
-            Insights & System
-          </p>
-          {nav.slice(9).map((item) => (
-            <NavItem
-              key={item.href}
-              {...item}
-              active={pathname === item.href}
-            />
-          ))}
+          {insights.length > 0 ? (
+            <>
+              <p className="mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted/70">
+                Insights & System
+              </p>
+              {insights.map((item) => (
+                <NavItem
+                  key={item.href}
+                  {...item}
+                  active={pathname === item.href}
+                />
+              ))}
+            </>
+          ) : null}
         </nav>
 
         <div className="border-t border-line/50 p-4">
@@ -117,14 +140,19 @@ export function Sidebar() {
             <div className="flex h-9 w-9 items-center justify-center rounded-full border border-gold/40 bg-gold/15 text-sm font-semibold text-gold-soft">
               {name.slice(0, 2).toUpperCase()}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-ink">{name}</p>
-              <p className="text-[11px] text-ink-muted">{role}</p>
+              <p className="text-[11px] text-ink-muted">{roleLabel}</p>
             </div>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-muted transition hover:bg-mist hover:text-coral"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
-          <p className="mt-3 text-[10px] leading-relaxed text-ink-muted/60">
-            Live MongoDB data
-          </p>
         </div>
       </div>
     </aside>

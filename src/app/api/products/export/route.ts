@@ -4,11 +4,15 @@ import { buildCatalogueExport } from "@/lib/excel/template";
 import { Product } from "@/lib/models";
 import { toJSONList } from "@/lib/serialize";
 import type { Product as ProductType } from "@/lib/types";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const products = await Product.find().sort({ name: 1 });
     const list = toJSONList(products) as ProductType[];

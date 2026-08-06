@@ -3,6 +3,7 @@ import { buildReceiptDoc } from "@/lib/receipt/document";
 import { loadReceiptSettings, parseFormat } from "@/lib/receipt/server";
 import { renderReceiptHtml } from "@/lib/receipt/template";
 import type { ReceiptLine } from "@/lib/receipt/types";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type Body = {
   format?: string;
@@ -17,6 +18,9 @@ type Body = {
 /** Renders the live cart as a draft bill — used by the POS print button before checkout. */
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const body = (await req.json()) as Body;
     const lines = (body.lines ?? []).map((line) => ({
       name: String(line.name ?? ""),

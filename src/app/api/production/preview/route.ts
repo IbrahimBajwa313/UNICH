@@ -4,12 +4,17 @@ import {
   requireFormulaAdmin,
 } from "@/lib/auth/formulaAdmin";
 import { connectDB } from "@/lib/db";
+import { checkStockAvailability } from "@/lib/inventory/stockCheck";
 import { planProduction } from "@/lib/production/planProduction";
 import { SaleError } from "@/lib/sales/errors";
 import { Product } from "@/lib/models";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 
@@ -32,6 +37,26 @@ export async function POST(req: Request) {
       }
     }
 
+    // INV-06: warn on any material shortfall before produce (not sale-only)
+    const stock = await checkStockAvailability(
+      plan.plannedLines.map((l) => ({
+        productId: l.productId,
+        qty: l.qty,
+        productName: l.productName,
+      })),
+    );
+
+    const plannedLines = plan.plannedLines.map((l) => {
+      const row = stock.shortages.find((s) => s.productId === l.productId);
+      return {
+        ...l,
+        stockAvailable: row?.available ?? 0,
+        fifoAvailable: row?.fifoAvailable ?? 0,
+        stockShort: row?.short ?? false,
+        stockWarning: row?.short ? row.warning : undefined,
+      };
+    });
+
     return NextResponse.json({
       formulaId: plan.formulaId,
       formulaName: plan.formulaName,
@@ -42,8 +67,10 @@ export async function POST(req: Request) {
       needsOilSelection: plan.needsOilSelection,
       oilProductId: plan.oilProductId,
       oilProductName: plan.oilProductName,
-      plannedLines: plan.plannedLines,
+      plannedLines,
       defaultOutputQty,
+      stockOk: stock.ok,
+      stockWarnings: stock.warnings,
     });
   } catch (error) {
     if (error instanceof SaleError) {

@@ -14,8 +14,15 @@ import type { Expense } from "@/lib/types";
 export default function ExpensesPage() {
   const { data: expenses, loading, error, reload } = useApiData<Expense[]>("/api/expenses");
   const [draft, setDraft] = useState<Partial<Expense> | null>(null);
-  const rows = expenses ?? [];
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "Wastage">("all");
+  const rows = (expenses ?? []).filter((e) =>
+    categoryFilter === "all" ? true : e.category === "Wastage",
+  );
+  const allRows = expenses ?? [];
   const total = rows.reduce((sum, expense) => sum + expense.amount, 0);
+  const wastageTotal = allRows
+    .filter((e) => e.category === "Wastage")
+    .reduce((sum, e) => sum + e.amount, 0);
   async function save() {
     if (!draft?.category || !draft.detail || !draft.amount) return;
     await api(draft.id ? `/api/expenses/${draft.id}` : "/api/expenses", { method: draft.id ? "PUT" : "POST", body: JSON.stringify({ ...draft, amount: Number(draft.amount) }) });
@@ -37,12 +44,37 @@ export default function ExpensesPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <Stat label="Recorded Expenses" value={formatMoney(total)} />
         <Stat label="Expense Entries" value={String(rows.length)} />
-        <Stat label="Pending Approval" value={String(rows.filter((e) => e.status === "pending").length)} hint="Awaiting approval" />
+        <Stat
+          label="Damage / Wastage"
+          value={formatMoney(wastageTotal)}
+          hint="INV-07 cost wastage"
+        />
       </div>
 
       <Panel className="mt-6" padding={false}>
         <div className="border-b border-line/70 px-5 py-4">
-          <PanelHeader title="Recent Expenses" subtitle="Approval workflow stub" />
+          <PanelHeader
+            title="Recent Expenses"
+            subtitle="Filter damage/wastage for admin tracking"
+            action={
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={categoryFilter === "all" ? "gold" : "secondary"}
+                  onClick={() => setCategoryFilter("all")}
+                >
+                  All
+                </Button>
+                <Button
+                  size="sm"
+                  variant={categoryFilter === "Wastage" ? "gold" : "secondary"}
+                  onClick={() => setCategoryFilter("Wastage")}
+                >
+                  Damage / Wastage
+                </Button>
+              </div>
+            }
+          />
         </div>
         <table className="w-full text-left text-sm">
           <thead className="bg-mist/70 text-[11px] uppercase tracking-wider text-ink-muted">

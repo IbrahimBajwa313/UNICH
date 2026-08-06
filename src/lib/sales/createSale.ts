@@ -38,6 +38,9 @@ export type CreateSaleInput = {
   lines: IncomingSaleLine[];
   status?: "completed" | "held" | "void";
   idempotencyKey?: string;
+  /** BRN-08: stamp from session when present */
+  branchId?: string | null;
+  branchName?: string | null;
 };
 
 /** Short TTL cache — AppSettings rarely changes during a POS shift. */
@@ -340,6 +343,8 @@ async function holdSale(input: CreateSaleInput) {
     total: subtotal,
     saleType: resolveSaleType(lines),
     inventoryDeductions: [],
+    ...(input.branchId ? { branchId: input.branchId } : {}),
+    ...(input.branchName ? { branchName: input.branchName } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -513,6 +518,8 @@ export async function createSale(input: CreateSaleInput) {
       saleType: resolveSaleType(validated.lines),
       idempotencyKey,
       inventoryDeductions: auditForInsert(audit),
+      ...(input.branchId ? { branchId: input.branchId } : {}),
+      ...(input.branchName ? { branchName: input.branchName } : {}),
       createdAt: now,
       updatedAt: now,
     };

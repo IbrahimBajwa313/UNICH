@@ -214,6 +214,9 @@ const PurchaseOrderSchema = new Schema(
     itemCount: { type: Number, required: true, default: 0 },
     lines: { type: [PurchaseOrderLineSchema], default: [] },
     notes: String,
+    /** BRN-08 branch isolation */
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
+    branchName: String,
   },
   { timestamps: true },
 );
@@ -233,6 +236,9 @@ const QuotationSchema = new Schema(
     total: { type: Number, required: true, default: 0 },
     items: { type: Number, required: true, default: 0 },
     convertedToSaleId: { type: Schema.Types.ObjectId, ref: "Sale" },
+    /** BRN-08 branch isolation */
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
+    branchName: String,
   },
   { timestamps: true },
 );
@@ -313,6 +319,9 @@ const SaleSchema = new Schema(
       index: true,
     },
     inventoryDeductions: [InventoryDeductionSchema],
+    /** BRN-08 branch isolation */
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
+    branchName: String,
   },
   { timestamps: true },
 );
@@ -358,6 +367,9 @@ const ExpenseSchema = new Schema(
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
+    /** BRN-08 branch isolation */
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
+    branchName: String,
   },
   { timestamps: true },
 );
@@ -525,7 +537,16 @@ const ProductionOrderSchema = new Schema(
     formulaVersion: { type: Number, required: true, default: 1 },
     /** Number of formula runs (e.g. bottles to produce). */
     qty: { type: Number, required: true, min: 1 },
+    /** BLD-06 expected yield (formula.yieldMl × qty). */
     yieldMl: { type: Number, required: true, default: 0 },
+    /** BLD-06 actual measured yield on complete. */
+    actualYieldMl: { type: Number },
+    /** BLD-06: actual − expected. */
+    varianceMl: { type: Number },
+    /** BLD-06: shortfall when actual < expected. */
+    wastageMl: { type: Number },
+    /** BLD-06: |variance| ≤ ±5 ml. */
+    withinTolerance: { type: Boolean },
     status: {
       type: String,
       enum: ["draft", "completed", "cancelled"],
@@ -576,3 +597,87 @@ export const ImportBatch =
   models.ImportBatch || model("ImportBatch", ImportBatchSchema);
 export const ProductionOrder =
   models.ProductionOrder || model("ProductionOrder", ProductionOrderSchema);
+
+/** INV-07 audit trail for stock adjustments / wastage. */
+const InventoryAdjustmentSchema = new Schema(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    productName: { type: String, required: true },
+    qty: { type: Number, required: true, min: 0 },
+    direction: { type: String, enum: ["in", "out"], required: true },
+    reason: {
+      type: String,
+      enum: ["wastage_cost", "wastage_customer", "restock", "adjustment"],
+      required: true,
+    },
+    /** INV-07: cost vs customer-paid liability. */
+    liability: {
+      type: String,
+      enum: ["cost", "customer_paid"],
+    },
+    costTotal: { type: Number, default: 0 },
+    customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
+    customerName: String,
+    customerPhone: String,
+    saleId: { type: Schema.Types.ObjectId, ref: "Sale" },
+    expenseId: { type: Schema.Types.ObjectId, ref: "Expense" },
+    notes: String,
+    createdBy: String,
+    /** BRN-08 branch isolation */
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
+    branchName: String,
+  },
+  { timestamps: true },
+);
+InventoryAdjustmentSchema.index({ createdAt: -1 });
+InventoryAdjustmentSchema.index({ productId: 1, createdAt: -1 });
+
+export const InventoryAdjustment =
+  models.InventoryAdjustment ||
+  model("InventoryAdjustment", InventoryAdjustmentSchema);
+
+/** BRN-08: physical / logical store for branch isolation. */
+const BranchSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    code: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    active: { type: Boolean, default: true },
+  },
+  { timestamps: true },
+);
+
+/** BRN-08: login identity with role + branch. */
+const UserSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      lowercase: true,
+      index: true,
+    },
+    passwordHash: { type: String, required: true },
+    role: {
+      type: String,
+      enum: ["super_admin", "admin", "sales", "accountant", "inventory"],
+      required: true,
+      index: true,
+    },
+    roleLabel: { type: String, required: true },
+    branchId: {
+      type: Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+    branchName: { type: String, default: null },
+    active: { type: Boolean, default: true, index: true },
+    lastLoginAt: { type: Date, default: null },
+  },
+  { timestamps: true },
+);
+
+export const Branch = models.Branch || model("Branch", BranchSchema);
+export const User = models.User || model("User", UserSchema);

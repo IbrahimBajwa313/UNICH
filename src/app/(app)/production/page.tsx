@@ -11,6 +11,10 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Stat } from "@/components/ui/Stat";
 import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import {
+  computeYieldVariance,
+  YIELD_TOLERANCE_ML,
+} from "@/lib/production/yieldVariance";
 import type { ProductionOrder, ProductionPlannedLine } from "@/lib/types";
 
 const statusTone = {
@@ -53,6 +57,8 @@ type PreviewPayload = {
   oilProductName?: string;
   plannedLines: ProductionPlannedLine[];
   defaultOutputQty: number;
+  stockOk?: boolean;
+  stockWarnings?: string[];
 };
 
 export default function ProductionPage() {
@@ -84,6 +90,7 @@ export default function ProductionPage() {
   const [oilProductId, setOilProductId] = useState("");
   const [outputProductId, setOutputProductId] = useState("");
   const [outputQty, setOutputQty] = useState("");
+  const [actualYieldMl, setActualYieldMl] = useState("");
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -92,6 +99,7 @@ export default function ProductionPage() {
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>("");
+  const [draftActualYield, setDraftActualYield] = useState("");
   const formRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -142,6 +150,19 @@ export default function ProductionPage() {
     () => formulaList.find((f) => f.id === formulaId) || null,
     [formulaList, formulaId],
   );
+
+  const expectedYieldMl = useMemo(() => {
+    if (preview) return preview.yieldMl;
+    if (selectedFormula) return selectedFormula.yieldMl * (Number(qty) || 1);
+    return 0;
+  }, [preview, selectedFormula, qty]);
+
+  const yieldCheck = useMemo(() => {
+    if (!actualYieldMl || !(Number(actualYieldMl) > 0) || !(expectedYieldMl > 0)) {
+      return null;
+    }
+    return computeYieldVariance(expectedYieldMl, Number(actualYieldMl));
+  }, [actualYieldMl, expectedYieldMl]);
 
   const stats = useMemo(() => {
     const draft = orderList.filter((o) => o.status === "draft").length;
@@ -217,6 +238,9 @@ export default function ProductionPage() {
       if (!outputQty && data.defaultOutputQty) {
         setOutputQty(String(data.defaultOutputQty));
       }
+      if (!actualYieldMl && data.yieldMl > 0) {
+        setActualYieldMl(String(data.yieldMl));
+      }
     } catch (e) {
       setPreview(null);
       setPreviewError(e instanceof Error ? e.message : "Preview failed");
@@ -231,6 +255,7 @@ export default function ProductionPage() {
     setOilProductId("");
     setOutputProductId("");
     setOutputQty("");
+    setActualYieldMl("");
     setNotes("");
     setPreview(null);
     setPreviewError(null);
@@ -246,6 +271,31 @@ export default function ProductionPage() {
       setFormError("Select an oil for this remix formula");
       return;
     }
+    if (complete) {
+      if (!(Number(actualYieldMl) > 0)) {
+        setFormError("Actual yield (ml) is required (BLD-06)");
+        return;
+      }
+      const check = computeYieldVariance(expectedYieldMl, Number(actualYieldMl));
+      if (!check.withinTolerance) {
+        setFormError(
+          `Yield variance ${check.varianceMl >= 0 ? "+" : ""}${check.varianceMl} ml exceeds ±${YIELD_TOLERANCE_ML} ml`,
+        );
+        return;
+      }
+    }
+    if (
+      complete &&
+      preview &&
+      preview.stockOk === false &&
+      preview.stockWarnings &&
+      preview.stockWarnings.length > 0
+    ) {
+      const proceed = window.confirm(
+        `${preview.stockWarnings[0]}\n\nProduce will fail if FIFO is short. Continue anyway?`,
+      );
+      if (!proceed) return;
+    }
     setBusy(true);
     setFormError(null);
     try {
@@ -257,6 +307,7 @@ export default function ProductionPage() {
           oilProductId: oilProductId || undefined,
           outputProductId,
           outputQty: outputQty ? Number(outputQty) : undefined,
+          actualYieldMl: complete ? Number(actualYieldMl) : undefined,
           notes: notes || undefined,
           complete,
         }),
@@ -273,10 +324,35 @@ export default function ProductionPage() {
   }
 
   async function completeDraft(id: string) {
+    const order = orderList.find((o) => o.id === id);
+    const expected = order?.yieldMl ?? 0;
+    const raw =
+      draftActualYield.trim() ||
+      window.prompt(
+        `Actual yield (ml) — expected ${expected} ml (±${YIELD_TOLERANCE_ML} ml)`,
+        String(expected || ""),
+      );
+    if (raw === null) return;
+    const actual = Number(raw);
+    if (!(actual > 0)) {
+      setFormError("Actual yield (ml) is required (BLD-06)");
+      return;
+    }
+    const check = computeYieldVariance(expected, actual);
+    if (!check.withinTolerance) {
+      setFormError(
+        `Yield variance ${check.varianceMl >= 0 ? "+" : ""}${check.varianceMl} ml exceeds ±${YIELD_TOLERANCE_ML} ml`,
+      );
+      return;
+    }
     setBusyId(id);
     setFormError(null);
     try {
-      await api(`/api/production/${id}/complete`, { method: "POST" });
+      await api(`/api/production/${id}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ actualYieldMl: actual }),
+      });
+      setDraftActualYield("");
       await reload();
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "Failed to complete order");
@@ -517,6 +593,50 @@ export default function ProductionPage() {
               placeholder="Auto from formula yield"
             />
 
+            <Input
+              label={`Actual yield (ml) · ±${YIELD_TOLERANCE_ML} ml`}
+              type="number"
+              min={0}
+              step="any"
+              value={actualYieldMl}
+              onChange={(e) => setActualYieldMl(e.target.value)}
+              placeholder={
+                expectedYieldMl > 0
+                  ? `Expected ${expectedYieldMl} ml`
+                  : "Required to produce"
+              }
+            />
+
+            {yieldCheck ? (
+              <div
+                className={`md:col-span-2 rounded-lg border px-3 py-2 text-sm ${
+                  yieldCheck.withinTolerance
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-ink"
+                    : "border-coral/40 bg-coral/10 text-coral"
+                }`}
+              >
+                <p className="font-medium">
+                  Yield variance {yieldCheck.varianceMl >= 0 ? "+" : ""}
+                  {yieldCheck.varianceMl} ml
+                  {yieldCheck.withinTolerance
+                    ? ` · within ±${YIELD_TOLERANCE_ML} ml`
+                    : ` · exceeds ±${YIELD_TOLERANCE_ML} ml`}
+                </p>
+                <p className="mt-0.5 text-xs opacity-90">
+                  Expected {yieldCheck.expectedYieldMl} ml · Actual{" "}
+                  {yieldCheck.actualYieldMl} ml
+                  {yieldCheck.wastageMl > 0
+                    ? ` · Wastage/evaporation ${yieldCheck.wastageMl} ml`
+                    : ""}
+                </p>
+              </div>
+            ) : expectedYieldMl > 0 ? (
+              <p className="md:col-span-2 text-xs text-ink-muted">
+                BLD-06: enter actual yield — tolerance ±{YIELD_TOLERANCE_ML} ml vs
+                expected {expectedYieldMl} ml.
+              </p>
+            ) : null}
+
             <div className="md:col-span-2">
               <Input
                 label="Notes"
@@ -544,7 +664,13 @@ export default function ProductionPage() {
             </Button>
             <Button
               variant="gold"
-              disabled={busy || !formulaId || !outputProductId}
+              disabled={
+                busy ||
+                !formulaId ||
+                !outputProductId ||
+                !(Number(actualYieldMl) > 0) ||
+                (yieldCheck != null && !yieldCheck.withinTolerance)
+              }
               onClick={() => void submitOrder(true)}
             >
               {busy ? "Producing…" : "Produce now"}
@@ -558,17 +684,37 @@ export default function ProductionPage() {
           {preview ? (
             <div className="mt-5 rounded-xl border border-line bg-mist/40 p-4">
               <p className="text-sm font-medium text-ink">
-                Material plan · {preview.formulaName} · yield {preview.yieldMl} ml
+                Material plan · {preview.formulaName} · expected yield{" "}
+                {preview.yieldMl} ml
                 {preview.oilProductName
                   ? ` · oil ${preview.oilProductName}`
                   : ""}
               </p>
+              {preview.stockWarnings && preview.stockWarnings.length > 0 ? (
+                <div className="mt-3 rounded-lg border border-coral/40 bg-coral/10 px-3 py-2 text-sm text-coral">
+                  <p className="font-medium">Stock warnings (INV-06)</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {preview.stockWarnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-xs opacity-90">
+                    Produce now will still block on insufficient FIFO. Admin should
+                    restock or reorder first.
+                  </p>
+                </div>
+              ) : preview.stockOk === true ? (
+                <p className="mt-2 text-xs text-sage">
+                  Stock check OK — all materials available.
+                </p>
+              ) : null}
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full min-w-[480px] text-left text-sm">
                   <thead className="text-xs uppercase tracking-wide text-ink-muted">
                     <tr>
                       <th className="pb-2 font-medium">Component</th>
                       <th className="pb-2 font-medium">Qty</th>
+                      <th className="pb-2 font-medium">Available</th>
                       <th className="pb-2 font-medium">Unit</th>
                       <th className="pb-2 font-medium">Reason</th>
                     </tr>
@@ -576,8 +722,22 @@ export default function ProductionPage() {
                   <tbody className="divide-y divide-line/60">
                     {preview.plannedLines.map((line) => (
                       <tr key={`${line.productId}-${line.reason}`}>
-                        <td className="py-2 text-ink">{line.productName}</td>
+                        <td className="py-2 text-ink">
+                          {line.productName}
+                          {line.stockShort ? (
+                            <Badge tone="warning" className="ml-2">
+                              Short
+                            </Badge>
+                          ) : null}
+                        </td>
                         <td className="py-2 tabular-nums text-ink">{line.qty}</td>
+                        <td
+                          className={`py-2 tabular-nums ${
+                            line.stockShort ? "text-coral" : "text-ink-muted"
+                          }`}
+                        >
+                          {line.stockAvailable ?? "—"}
+                        </td>
                         <td className="py-2 text-ink-muted">{line.unit}</td>
                         <td className="py-2 text-ink-muted">{line.reason}</td>
                       </tr>
@@ -699,7 +859,39 @@ export default function ProductionPage() {
                     ? ` · oil ${selected.oilProductName}`
                     : ""}
                 </p>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Expected yield {selected.yieldMl} ml
+                  {selected.actualYieldMl != null
+                    ? ` · Actual ${selected.actualYieldMl} ml · Variance ${
+                        (selected.varianceMl ?? 0) >= 0 ? "+" : ""
+                      }${selected.varianceMl ?? 0} ml`
+                    : ""}
+                  {selected.wastageMl != null && selected.wastageMl > 0
+                    ? ` · Wastage ${selected.wastageMl} ml`
+                    : ""}
+                </p>
               </div>
+
+              {selected.status === "draft" ? (
+                <div className="space-y-2">
+                  <Input
+                    label={`Actual yield to produce (ml) · ±${YIELD_TOLERANCE_ML}`}
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={draftActualYield}
+                    onChange={(e) => setDraftActualYield(e.target.value)}
+                    placeholder={`Expected ${selected.yieldMl} ml`}
+                  />
+                  <Button
+                    variant="gold"
+                    disabled={busyId === selected.id}
+                    onClick={() => void completeDraft(selected.id)}
+                  >
+                    Produce with yield check
+                  </Button>
+                </div>
+              ) : null}
 
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">

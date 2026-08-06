@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Supplier } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 function mapSupplier(s: Record<string, unknown>) {
   return {
@@ -12,8 +13,11 @@ function mapSupplier(s: Record<string, unknown>) {
   };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const suppliers = await Supplier.find().sort({ name: 1 });
     return NextResponse.json(toJSONList(suppliers).map(mapSupplier));
@@ -27,6 +31,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
     const supplier = await Supplier.create({

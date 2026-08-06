@@ -6,6 +6,7 @@ import {
 import { connectDB } from "@/lib/db";
 import { formulaNeedsOilSelection } from "@/lib/production/planProduction";
 import { Formula, Product } from "@/lib/models";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 /**
  * Approved formulas + finished-goods SKUs for the production order form.
@@ -13,6 +14,9 @@ import { Formula, Product } from "@/lib/models";
  */
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 

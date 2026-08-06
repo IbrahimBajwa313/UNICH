@@ -5,12 +5,16 @@ import { logDelivery } from "@/lib/notifications/log";
 import { receiptNumberFor } from "@/lib/receipt/document";
 import { toJSONList } from "@/lib/serialize";
 import type { DeliveryChannel, DeliveryStatus } from "@/lib/types";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 const CHANNELS: DeliveryChannel[] = ["print", "email", "whatsapp", "sms"];
 const STATUSES: DeliveryStatus[] = ["sent", "failed", "handoff", "printed"];
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const saleId = searchParams.get("saleId");
@@ -41,6 +45,9 @@ export async function GET(req: Request) {
 /** Records browser-side deliveries (print jobs, opened WhatsApp hand-offs). */
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const body = (await req.json()) as Record<string, unknown>;
     const channel = String(body.channel || "") as DeliveryChannel;
     const status = String(body.status || "sent") as DeliveryStatus;

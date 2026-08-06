@@ -13,6 +13,7 @@ import {
 import { validateFormulaInput } from "@/lib/formulas/validateFormula";
 import { Formula } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 /**
  * GET formulas.
@@ -21,6 +22,9 @@ import { toJSON, toJSONList } from "@/lib/serialize";
  */
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const customerId = searchParams.get("customerId");
@@ -72,6 +76,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     const admin = requireFormulaAdmin(req);
     if (isFormulaAdminResponse(admin)) return admin;
 

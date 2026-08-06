@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Sale } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -23,8 +24,11 @@ function mapSale(s: Record<string, unknown>) {
   };
 }
 
-export async function GET(_req: Request, context: RouteContext) {
+export async function GET(req: Request, context: RouteContext) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await context.params;
     const sale = await Sale.findById(id);
@@ -46,6 +50,9 @@ export async function GET(_req: Request, context: RouteContext) {
  */
 export async function PATCH(req: Request, context: RouteContext) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { id } = await context.params;
     const body = await req.json();

@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import { connectDB } from "../src/lib/db";
 import {
   AppSettings,
+  Branch,
   Customer,
   Expense,
   FifoLayer,
@@ -21,7 +22,10 @@ import {
   Quotation,
   Sale,
   Supplier,
+  User,
 } from "../src/lib/models";
+import { hashPassword } from "../src/lib/auth/password";
+import { ROLE_LABELS } from "../src/lib/auth/roles";
 
 async function clearAll() {
   await Promise.all([
@@ -35,6 +39,8 @@ async function clearAll() {
     Sale.deleteMany({}),
     Expense.deleteMany({}),
     AppSettings.deleteMany({}),
+    User.deleteMany({}),
+    Branch.deleteMany({}),
   ]);
 }
 
@@ -1172,11 +1178,64 @@ async function seed() {
     ],
   });
 
+  // BRN-08: default branch + role accounts
+  const mainBranch = await Branch.create({
+    name: "Main Store — Dubai",
+    code: "MAIN",
+    active: true,
+  });
+
+  const adminEmail = (
+    process.env.ADMIN_EMAIL ||
+    "admin@unich.local"
+  )
+    .trim()
+    .toLowerCase();
+  const adminPassword =
+    process.env.ADMIN_PASSWORD ||
+    process.env.IMPORT_ADMIN_PASSWORD ||
+    "admin";
+
+  await User.insertMany([
+    {
+      name: "Super Admin",
+      email: adminEmail,
+      passwordHash: hashPassword(adminPassword),
+      role: "super_admin",
+      roleLabel: ROLE_LABELS.super_admin,
+      branchId: mainBranch._id,
+      branchName: mainBranch.name,
+      active: true,
+    },
+    {
+      name: "Sales Demo",
+      email: "sales@unich.local",
+      passwordHash: hashPassword("sales123"),
+      role: "sales",
+      roleLabel: ROLE_LABELS.sales,
+      branchId: mainBranch._id,
+      branchName: mainBranch.name,
+      active: true,
+    },
+    {
+      name: "Accountant Demo",
+      email: "accounts@unich.local",
+      passwordHash: hashPassword("accounts123"),
+      role: "accountant",
+      roleLabel: ROLE_LABELS.accountant,
+      branchId: mainBranch._id,
+      branchName: mainBranch.name,
+      active: true,
+    },
+  ]);
+
   console.log("Seed complete:");
   console.log(`  Products: ${products.length}`);
   console.log(`  Suppliers: ${suppliers.length}`);
   console.log(`  Customers: ${customers.length}`);
   console.log(`  Sales: ${salesSeed.length}`);
+  console.log(`  Branch: ${mainBranch.name}`);
+  console.log(`  Users: ${adminEmail} / sales@unich.local / accounts@unich.local`);
   await mongoose.disconnect();
 }
 

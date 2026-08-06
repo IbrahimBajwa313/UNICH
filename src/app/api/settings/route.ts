@@ -4,6 +4,7 @@ import { AppSettings } from "@/lib/models";
 import { smsConfigured } from "@/lib/notifications/sms";
 import { invalidateReceiptSettingsCache } from "@/lib/receipt/server";
 import { toJSON } from "@/lib/serialize";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 function normalizeSalespeople(value: unknown, fallbackName?: string) {
   const list = Array.isArray(value)
@@ -55,8 +56,11 @@ function withSalesTeamDefaults(json: Record<string, unknown>) {
   };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     let settings = await AppSettings.findOne({ key: "default" });
     if (!settings) {
@@ -73,6 +77,9 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = (await req.json()) as Record<string, unknown>;
     const salespeople = normalizeSalespeople(

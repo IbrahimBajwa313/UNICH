@@ -6,6 +6,7 @@ import {
   type ExistingProductRef,
 } from "@/lib/excel/validate";
 import { ImportBatch, Product } from "@/lib/models";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
@@ -54,6 +55,9 @@ function checkAdminPassword(password: string | undefined): boolean {
 
 export async function POST(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const body = await req.json();
     const batchId = String(body.batchId || "");

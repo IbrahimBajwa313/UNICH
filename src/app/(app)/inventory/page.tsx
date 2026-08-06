@@ -61,6 +61,14 @@ export default function InventoryPage() {
   );
   const [toast, setToast] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [adjustQty, setAdjustQty] = useState("1");
+  const [wastageKind, setWastageKind] = useState<"cost" | "customer">("cost");
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [customerHits, setCustomerHits] = useState<
+    Array<{ id: string; name: string; phone: string }>
+  >([]);
+  const [customerSearching, setCustomerSearching] = useState(false);
 
   const inventory = products ?? emptyProducts;
 
@@ -155,7 +163,11 @@ export default function InventoryPage() {
     inventory[0]?.id ||
     "";
 
-  const { data: layers, loading: layersLoading } = useApiData<FifoLayer[]>(
+  const {
+    data: layers,
+    loading: layersLoading,
+    reload: reloadLayers,
+  } = useApiData<FifoLayer[]>(
     activeId ? `/api/fifo-layers?productId=${activeId}` : null,
   );
 
@@ -164,9 +176,33 @@ export default function InventoryPage() {
     (p) => p.lowStockAt > 0 && p.stockSellable <= p.lowStockAt,
   ).length;
 
-  function flash(msg: string) {
+  function flash(msg: string, ms = 4000) {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2800);
+    window.setTimeout(() => setToast(null), ms);
+  }
+
+  /** Patch sellable on the spot (optimistic / confirmed). */
+  function patchSellable(productId: string, stockSellable: number, extra?: Partial<Product>) {
+    setProducts((prev) => {
+      const list = prev ?? [];
+      return list.map((p) =>
+        p.id === productId
+          ? { ...p, stockSellable, ...extra }
+          : p,
+      );
+    });
+  }
+
+  /** Confirm patch + refresh FIFO layers in background (do not block UI). */
+  function applyAdjustResult(updated: {
+    id: string;
+    stockSellable: number;
+    costFifo?: number;
+  }) {
+    patchSellable(updated.id, updated.stockSellable, {
+      costFifo: updated.costFifo,
+    });
+    void reloadLayers({ silent: true });
   }
 
   function selectCategory(next: string) {
@@ -198,20 +234,197 @@ export default function InventoryPage() {
 
   async function saveStock() {
     if (!selectedProduct) return;
+    if (selectedProduct.stockSellable < 0) {
+      const ok = window.confirm(
+        `Stock warning: ${selectedProduct.name} sellable would be ${selectedProduct.stockSellable}. Negative stock is permitted with warning — admin should restock or reorder. Save anyway?`,
+      );
+      if (!ok) return;
+    }
     setSaving(true);
     try {
-      await api(`/api/products/${selectedProduct.id}`, {
-        method: "PUT",
+      const res = await api<{ warnings?: string[] }>(
+        `/api/products/${selectedProduct.id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            stockSellable: selectedProduct.stockSellable,
+            stockTester: selectedProduct.stockTester,
+            stockSample: selectedProduct.stockSample,
+            stockPersonal: selectedProduct.stockPersonal,
+            lowStockAt: selectedProduct.lowStockAt,
+          }),
+        },
+      );
+      await reload();
+      if (res.warnings && res.warnings.length > 0) {
+        flash(res.warnings[0]);
+      } else {
+        flash("Stock saved");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function searchCustomers(q: string) {
+    setCustomerQuery(q);
+    setCustomerId("");
+    if (q.trim().length < 2) {
+      setCustomerHits([]);
+      return;
+    }
+    setCustomerSearching(true);
+    try {
+      const rows = await api<Array<{ id: string; name: string; phone: string }>>(
+        `/api/customers?q=${encodeURIComponent(q.trim())}`,
+      );
+      setCustomerHits(rows.slice(0, 8));
+    } catch {
+      setCustomerHits([]);
+    } finally {
+      setCustomerSearching(false);
+    }
+  }
+
+  async function adjustStock(direction: "in" | "out") {
+    if (!selectedProduct) return;
+    const qty = Number(adjustQty);
+    if (!Number.isFinite(qty) || !(qty > 0)) {
+      flash("Qty must be greater than 0");
+      return;
+    }
+
+    const reason =
+      direction === "in"
+        ? "restock"
+        : wastageKind === "customer"
+          ? "wastage_customer"
+          : "wastage_cost";
+
+    if (reason === "wastage_customer" && !customerId) {
+      flash("Select a customer for leaked/damaged replacement (INV-07)");
+      return;
+    }
+
+    const productId = selectedProduct.id;
+    const before = selectedProduct.stockSellable;
+    const unit = selectedProduct.unit;
+    const optimisticAfter =
+      direction === "out" ? before - qty : before + qty;
+
+    // Instant Sellable update on the panel (revert if API fails)
+    patchSellable(productId, optimisticAfter);
+    setSaving(true);
+
+    try {
+      const payload: Record<string, unknown> = {
+        productId,
+        qty,
+        direction,
+        reason,
+      };
+      if (reason === "wastage_customer") {
+        payload.customerId = customerId;
+      }
+
+      const res = await fetch("/api/inventory/adjustments", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        expenseId?: string;
+        saleId?: string;
+        costTotal?: number;
+        stockSellable?: number;
+        product?: {
+          id?: string;
+          stockSellable?: number;
+          costFifo?: number;
+        } | null;
+      };
+
+      if (!res.ok) {
+        patchSellable(productId, before);
+        throw new Error(
+          data.error ||
+            "Stock not updated — check FIFO layers / sellable qty",
+        );
+      }
+
+      const after =
+        data.stockSellable !== undefined
+          ? Number(data.stockSellable)
+          : data.product?.stockSellable !== undefined
+            ? Number(data.product.stockSellable)
+            : optimisticAfter;
+
+      applyAdjustResult({
+        id: productId,
+        stockSellable: after,
+        costFifo:
+          data.product?.costFifo !== undefined
+            ? Number(data.product.costFifo)
+            : undefined,
+      });
+
+      if (data.saleId) {
+        flash(
+          `Saved · −${formatQty(qty, unit)} (${formatQty(before, unit)} → ${formatQty(after, unit)}) · customer paid`,
+        );
+      } else if (data.expenseId) {
+        flash(
+          `Saved · damage −${formatQty(qty, unit)} (${formatQty(before, unit)} → ${formatQty(after, unit)})${
+            data.costTotal != null ? ` · ${formatMoney(data.costTotal)}` : ""
+          } · Expenses`,
+        );
+      } else if (direction === "in") {
+        flash(
+          `Saved · restock +${formatQty(qty, unit)} (${formatQty(before, unit)} → ${formatQty(after, unit)})`,
+        );
+      } else {
+        flash(
+          `Saved · −${formatQty(qty, unit)} (${formatQty(before, unit)} → ${formatQty(after, unit)})`,
+        );
+      }
+      setAdjustQty("1");
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "Adjustment failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function transferBucket(
+    from: "stockSellable" | "stockTester" | "stockSample" | "stockPersonal",
+    to: "stockSellable" | "stockTester" | "stockSample" | "stockPersonal",
+  ) {
+    if (!selectedProduct) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/inventory/transfers", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          stockSellable: selectedProduct.stockSellable,
-          stockTester: selectedProduct.stockTester,
-          stockSample: selectedProduct.stockSample,
-          stockPersonal: selectedProduct.stockPersonal,
-          lowStockAt: selectedProduct.lowStockAt,
+          productId: selectedProduct.id,
+          qty: 1,
+          from,
+          to,
         }),
       });
+      const data = (await res.json()) as {
+        error?: string;
+        warnings?: string[];
+        requiresAck?: boolean;
+      };
+      if (!res.ok) throw new Error(data.error || "Transfer failed");
       await reload();
-      flash("Stock saved");
+      flash(data.warnings?.[0] || "Bucket transfer saved");
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "Transfer failed");
     } finally {
       setSaving(false);
     }
@@ -722,6 +935,113 @@ export default function InventoryPage() {
                 <Button className="mt-3" size="sm" onClick={saveStock} disabled={saving}>
                   {saving ? "Saving…" : "Save stock fields"}
                 </Button>
+                <div className="mt-4 border-t border-line pt-3">
+                  <p className="text-xs font-medium text-ink-muted">
+                    Damage / wastage / restock (INV-07)
+                  </p>
+                  <p className="mt-1 text-[11px] text-ink-muted">
+                    Qty = damage pieces. Record wastage out → Sellable updates
+                    instantly + saves (FIFO + Expenses). Short FIFO = error, stock
+                    reverts.
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className="text-xs text-ink-muted">
+                      Qty
+                      <input
+                        type="number"
+                        min={0.001}
+                        step="any"
+                        value={adjustQty}
+                        onChange={(e) => setAdjustQty(e.target.value)}
+                        className="mt-1 h-8 w-full rounded border border-line bg-mist px-2 text-sm text-ink"
+                      />
+                    </label>
+                    <label className="text-xs text-ink-muted">
+                      Out reason
+                      <select
+                        value={wastageKind}
+                        onChange={(e) =>
+                          setWastageKind(e.target.value as "cost" | "customer")
+                        }
+                        className="mt-1 h-8 w-full rounded border border-line bg-mist px-2 text-sm text-ink"
+                      >
+                        <option value="cost">Wastage as cost</option>
+                        <option value="customer">
+                          Customer damage (paid)
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                  {wastageKind === "customer" ? (
+                    <div className="mt-2 space-y-1">
+                      <label className="text-xs text-ink-muted">
+                        Customer (name or phone)
+                        <input
+                          type="search"
+                          value={customerQuery}
+                          onChange={(e) => void searchCustomers(e.target.value)}
+                          placeholder="Search customer…"
+                          className="mt-1 h-8 w-full rounded border border-line bg-mist px-2 text-sm text-ink"
+                        />
+                      </label>
+                      {customerSearching ? (
+                        <p className="text-[11px] text-ink-muted">Searching…</p>
+                      ) : null}
+                      {customerHits.length > 0 ? (
+                        <ul className="max-h-28 overflow-y-auto rounded border border-line bg-canvas text-sm">
+                          {customerHits.map((c) => (
+                            <li key={c.id}>
+                              <button
+                                type="button"
+                                className={`block w-full px-2 py-1.5 text-left hover:bg-mist ${
+                                  customerId === c.id ? "bg-gold/10" : ""
+                                }`}
+                                onClick={() => {
+                                  setCustomerId(c.id);
+                                  setCustomerQuery(`${c.name} · ${c.phone}`);
+                                  setCustomerHits([]);
+                                }}
+                              >
+                                {c.name} · {c.phone}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {customerId ? (
+                        <p className="text-[11px] text-sage">
+                          Customer selected for paid replacement.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={saving}
+                      onClick={() => void adjustStock("out")}
+                    >
+                      Record wastage out
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={saving}
+                      onClick={() => void adjustStock("in")}
+                    >
+                      Restock in
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={saving}
+                      onClick={() => void transferBucket("stockSellable", "stockTester")}
+                    >
+                      Sellable → Tester
+                    </Button>
+                  </div>
+                </div>
               </Panel>
 
               <Panel>

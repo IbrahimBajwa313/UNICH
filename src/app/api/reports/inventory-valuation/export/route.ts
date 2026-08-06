@@ -8,11 +8,15 @@ import {
   buildInventoryValuationCsv,
   parseValuationBucket,
 } from "@/lib/reports/inventoryValuation";
+import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
     await connectDB();
     const { searchParams } = new URL(req.url);
     const bucket = parseValuationBucket(searchParams.get("bucket"));
