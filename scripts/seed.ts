@@ -1178,56 +1178,67 @@ async function seed() {
     ],
   });
 
-  // BRN-08: default branch + role accounts
+  // BRN-08: default branch + role accounts (from .env)
   const mainBranch = await Branch.create({
     name: "Main Store — Dubai",
     code: "MAIN",
     active: true,
   });
 
-  const adminEmail = (
-    process.env.ADMIN_EMAIL ||
-    "admin@unich.local"
-  )
-    .trim()
-    .toLowerCase();
-  const adminPassword =
-    process.env.ADMIN_PASSWORD ||
-    process.env.IMPORT_ADMIN_PASSWORD ||
-    "admin";
+  const env = (name: string, fallback: string) =>
+    (process.env[name] || fallback).trim();
 
-  await User.insertMany([
+  const rbacUsers = [
     {
-      name: "Super Admin",
-      email: adminEmail,
-      passwordHash: hashPassword(adminPassword),
-      role: "super_admin",
-      roleLabel: ROLE_LABELS.super_admin,
+      name: env("ADMIN_NAME", "Super Admin"),
+      email: env(
+        "SUPER_ADMIN_EMAIL",
+        env("ADMIN_EMAIL", "abc@gmail.com"),
+      ).toLowerCase(),
+      password: env(
+        "SUPER_ADMIN_PASSWORD",
+        env("ADMIN_PASSWORD", "UnichAdmin@123"),
+      ),
+      role: "super_admin" as const,
+    },
+    {
+      name: "Admin",
+      email: env("ADMIN_USER_EMAIL", "admin@unich.local").toLowerCase(),
+      password: env("ADMIN_USER_PASSWORD", "admin123"),
+      role: "admin" as const,
+    },
+    {
+      name: "Sales Staff",
+      email: env("SALES_EMAIL", "sales@unich.local").toLowerCase(),
+      password: env("SALES_PASSWORD", "sales123"),
+      role: "sales" as const,
+    },
+    {
+      name: "Accountant",
+      email: env("ACCOUNTANT_EMAIL", "accounts@unich.local").toLowerCase(),
+      password: env("ACCOUNTANT_PASSWORD", "accounts123"),
+      role: "accountant" as const,
+    },
+    {
+      name: "Inventory",
+      email: env("INVENTORY_EMAIL", "inventory@unich.local").toLowerCase(),
+      password: env("INVENTORY_PASSWORD", "inventory123"),
+      role: "inventory" as const,
+    },
+  ];
+
+  await User.insertMany(
+    rbacUsers.map((u) => ({
+      name: u.name,
+      email: u.email,
+      passwordHash: hashPassword(u.password),
+      role: u.role,
+      roleLabel: ROLE_LABELS[u.role],
       branchId: mainBranch._id,
       branchName: mainBranch.name,
       active: true,
-    },
-    {
-      name: "Sales Demo",
-      email: "sales@unich.local",
-      passwordHash: hashPassword("sales123"),
-      role: "sales",
-      roleLabel: ROLE_LABELS.sales,
-      branchId: mainBranch._id,
-      branchName: mainBranch.name,
-      active: true,
-    },
-    {
-      name: "Accountant Demo",
-      email: "accounts@unich.local",
-      passwordHash: hashPassword("accounts123"),
-      role: "accountant",
-      roleLabel: ROLE_LABELS.accountant,
-      branchId: mainBranch._id,
-      branchName: mainBranch.name,
-      active: true,
-    },
-  ]);
+    })),
+  );
 
   console.log("Seed complete:");
   console.log(`  Products: ${products.length}`);
@@ -1235,7 +1246,10 @@ async function seed() {
   console.log(`  Customers: ${customers.length}`);
   console.log(`  Sales: ${salesSeed.length}`);
   console.log(`  Branch: ${mainBranch.name}`);
-  console.log(`  Users: ${adminEmail} / sales@unich.local / accounts@unich.local`);
+  console.log("  Users (from .env):");
+  for (const u of rbacUsers) {
+    console.log(`    ${u.email} → ${u.role}`);
+  }
   await mongoose.disconnect();
 }
 

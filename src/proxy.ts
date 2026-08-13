@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/auth/session";
+import { applyCorsHeaders, corsPreflightResponse } from "@/lib/cors";
 
 /**
  * Optimistic route gate (Next.js 16 proxy).
  * Authoritative checks live in API handlers via requireApiAccess / requirePermission.
+ * CORS for /api/* is applied here so preflight + credentialed clients work.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const isApi = pathname.startsWith("/api/");
 
   if (
     pathname.startsWith("/_next") ||
@@ -15,6 +18,14 @@ export function proxy(request: NextRequest) {
   ) {
     return NextResponse.next();
   }
+
+  if (isApi) {
+    const preflight = corsPreflightResponse(request);
+    if (preflight) return preflight;
+  }
+
+  const withCors = (res: NextResponse) =>
+    isApi ? applyCorsHeaders(res, request) : res;
 
   const isLogin = pathname === "/login" || pathname.startsWith("/login/");
   const isPublicApi =
@@ -27,7 +38,7 @@ export function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
 
   if (isPublicApi) {
-    return NextResponse.next();
+    return withCors(NextResponse.next());
   }
 
   if (isLogin) {
@@ -39,10 +50,12 @@ export function proxy(request: NextRequest) {
 
   // App pages + protected APIs: require cookie presence
   if (!hasSession) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json(
-        { error: "Authentication required. Please sign in." },
-        { status: 401 },
+    if (isApi) {
+      return withCors(
+        NextResponse.json(
+          { error: "Authentication required. Please sign in." },
+          { status: 401 },
+        ),
       );
     }
     const loginUrl = new URL("/login", request.url);
@@ -50,7 +63,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return withCors(NextResponse.next());
 }
 
 export const config = {

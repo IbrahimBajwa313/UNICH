@@ -112,13 +112,42 @@ export function getSessionFromRequest(req: Request): AppSession | null {
   return parseSessionToken(cookieFromRequest(req, SESSION_COOKIE));
 }
 
+const cookieBase = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  path: "/",
+  secure: process.env.NODE_ENV === "production",
+};
+
+/** Preferred App Router API — avoids manual Set-Cookie encoding bugs. */
+export function applySessionCookie(
+  res: { cookies: { set: (name: string, value: string, opts: Record<string, unknown>) => void } },
+  token: string,
+): void {
+  res.cookies.set(SESSION_COOKIE, token, {
+    ...cookieBase,
+    maxAge: COOKIE_MAX_AGE_SEC,
+  });
+}
+
+export function clearSessionCookie(
+  res: { cookies: { set: (name: string, value: string, opts: Record<string, unknown>) => void } },
+): void {
+  res.cookies.set(SESSION_COOKIE, "", {
+    ...cookieBase,
+    maxAge: 0,
+  });
+}
+
+/** @deprecated Prefer applySessionCookie — kept for string-header call sites. */
 export function sessionCookieHeader(token: string): string {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = cookieBase.secure ? "; Secure" : "";
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE_SEC}${secure}`;
 }
 
+/** @deprecated Prefer clearSessionCookie */
 export function clearSessionCookieHeader(): string {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = cookieBase.secure ? "; Secure" : "";
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 

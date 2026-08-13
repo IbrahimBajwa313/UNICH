@@ -14,7 +14,11 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!authenticated || !user) {
-      router.replace(`/login?from=${encodeURIComponent(pathname)}`);
+      // Full navigation so proxy + cookie state stay in sync (avoids soft-nav loops).
+      const dest = `/login?from=${encodeURIComponent(pathname)}`;
+      if (window.location.pathname !== "/login") {
+        window.location.replace(dest);
+      }
       return;
     }
     const perm = permissionForPath(pathname);

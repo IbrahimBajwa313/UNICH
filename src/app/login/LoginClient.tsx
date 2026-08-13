@@ -1,13 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { api } from "@/lib/api";
+import { AUTH_TIMEOUT_MS } from "@/lib/auth/timeout";
 
 export default function LoginClient() {
-  const router = useRouter();
   const search = useSearchParams();
   const from = search.get("from") || "/";
 
@@ -16,21 +16,43 @@ export default function LoginClient() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    // Warm Next compile + Mongo pool while the user types credentials.
+    void fetch("/api/health", { cache: "no-store" }).catch(() => {});
+  }, []);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(
+      () => controller.abort(),
+      AUTH_TIMEOUT_MS,
+    );
     try {
       await api("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       });
-      router.replace(from.startsWith("/") ? from : "/");
-      router.refresh();
+      // Hard navigation so the new HttpOnly cookie is on the next document
+      // request. Soft router.replace often bounced users back to /login once.
+      const dest = from.startsWith("/") && !from.startsWith("//") ? from : "/";
+      window.location.assign(dest);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
+      const aborted =
+        err instanceof DOMException && err.name === "AbortError";
+      setError(
+        aborted
+          ? "Login is taking too long (>3s). Check your connection and try again."
+          : err instanceof Error
+            ? err.message
+            : "Login failed",
+      );
       setBusy(false);
+    } finally {
+      window.clearTimeout(timer);
     }
   }
 

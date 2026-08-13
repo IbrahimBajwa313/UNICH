@@ -3,51 +3,83 @@ import { Branch, User } from "@/lib/models";
 import { hashPassword } from "@/lib/auth/password";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 
+/** Process-local lock so cold starts don't re-run bootstrap on every request. */
+let bootstrapPromise: Promise<void> | null = null;
+let bootstrapped = false;
+
+export function isAuthBootstrapped(): boolean {
+  return bootstrapped;
+}
+
 /**
  * Ensure at least one branch + admin user exist (BRN-08 bootstrap).
  * Uses ADMIN_EMAIL / ADMIN_PASSWORD from env when seeding the first admin.
+ * Safe to call often — runs at most once per process (retries on failure).
  */
 export async function ensureAuthBootstrap(): Promise<void> {
-  await connectDB();
+  if (bootstrapped) return;
+  if (bootstrapPromise) return bootstrapPromise;
 
-  let branch = await Branch.findOne({ code: "MAIN" });
-  if (!branch) {
-    branch = await Branch.create({
-      name: "Main Store — Dubai",
-      code: "MAIN",
-      active: true,
-    });
-  }
+  bootstrapPromise = (async () => {
+    await connectDB();
 
-  const userCount = await User.countDocuments();
-  if (userCount > 0) return;
+    let branch = await Branch.findOne({ code: "MAIN" }).lean();
+    if (!branch) {
+      branch = (
+        await Branch.create({
+          name: "Main Store — Dubai",
+          code: "MAIN",
+          active: true,
+        })
+      ).toObject();
+    }
 
-  const email = (
-    process.env.ADMIN_EMAIL ||
-    process.env.admin_email ||
-    "admin@unich.local"
-  )
-    .trim()
-    .toLowerCase();
-  const password =
-    process.env.ADMIN_PASSWORD ||
-    process.env.FORMULA_ADMIN_PASSWORD ||
-    process.env.IMPORT_ADMIN_PASSWORD ||
-    "admin";
+    const existing = await User.exists({});
+    if (existing) {
+      bootstrapped = true;
+      return;
+    }
 
-  const name =
-    process.env.ADMIN_NAME?.trim() ||
-    email.split("@")[0] ||
-    "Admin";
+    const email = (
+      process.env.ADMIN_EMAIL ||
+      process.env.admin_email ||
+      "admin@unich.local"
+    )
+      .trim()
+      .toLowerCase();
+    const password =
+      process.env.ADMIN_PASSWORD ||
+      process.env.FORMULA_ADMIN_PASSWORD ||
+      process.env.IMPORT_ADMIN_PASSWORD ||
+      "admin";
 
-  await User.create({
-    name,
-    email,
-    passwordHash: hashPassword(password),
-    role: "super_admin",
-    roleLabel: ROLE_LABELS.super_admin,
-    branchId: branch._id,
-    branchName: branch.name,
-    active: true,
+    const name =
+      process.env.ADMIN_NAME?.trim() ||
+      email.split("@")[0] ||
+      "Admin";
+
+    try {
+      await User.create({
+        name,
+        email,
+        passwordHash: hashPassword(password),
+        role: "super_admin",
+        roleLabel: ROLE_LABELS.super_admin,
+        branchId: branch._id,
+        branchName: branch.name,
+        active: true,
+      });
+    } catch (err) {
+      // Parallel first-login race: another request already created the admin.
+      const code = (err as { code?: number })?.code;
+      if (code !== 11000) throw err;
+    }
+    bootstrapped = true;
+  })().catch((err) => {
+    bootstrapPromise = null;
+    bootstrapped = false;
+    throw err;
   });
+
+  return bootstrapPromise;
 }

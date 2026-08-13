@@ -38,7 +38,9 @@ export async function connectDB() {
   if (!cached.promise) {
     cached.promise = mongoose.connect(MONGODB_URI!, {
       bufferCommands: false,
-      serverSelectionTimeoutMS: 10000,
+      // Fail fast so auth stays within ~3s instead of hanging on bad DNS/Atlas.
+      serverSelectionTimeoutMS: 2500,
+      connectTimeoutMS: 2500,
       socketTimeoutMS: 20000,
       family: 4,
       // Keep sockets warm for POS complete (parallel reserve + layer + insert).

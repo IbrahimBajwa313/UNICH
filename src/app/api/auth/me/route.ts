@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
-import { ensureAuthBootstrap } from "@/lib/auth/bootstrap";
-import { mapUserPublic } from "@/lib/auth/mapUser";
 import { permissionsForRole } from "@/lib/auth/roles";
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { User } from "@/lib/models";
 import type { AuthMe } from "@/lib/types";
 
-/** GET /api/auth/me — current session user + permissions. */
+/**
+ * GET /api/auth/me — cookie-only (no DB).
+ * Session is HMAC-signed; role/branch come from the token so UI unlocks in <100ms.
+ * Active-user checks happen at login (and on protected API writes via session).
+ */
 export async function GET(req: Request) {
   try {
-    await ensureAuthBootstrap();
     const session = getSessionFromRequest(req);
     if (!session) {
       const body: AuthMe = {
@@ -21,22 +20,19 @@ export async function GET(req: Request) {
       return NextResponse.json(body);
     }
 
-    await connectDB();
-    const user = await User.findById(session.userId);
-    if (!user || !user.active) {
-      const body: AuthMe = {
-        authenticated: false,
-        user: null,
-        permissions: [],
-      };
-      return NextResponse.json(body);
-    }
-
-    const mapped = mapUserPublic(user)!;
     const body: AuthMe = {
       authenticated: true,
-      user: mapped,
-      permissions: permissionsForRole(mapped.role),
+      user: {
+        id: session.userId,
+        name: session.name,
+        email: session.email,
+        role: session.role,
+        roleLabel: session.roleLabel,
+        branchId: session.branchId,
+        branchName: session.branchName,
+        active: true,
+      },
+      permissions: permissionsForRole(session.role),
     };
     return NextResponse.json(body);
   } catch (error) {

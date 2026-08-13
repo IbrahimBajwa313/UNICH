@@ -30,9 +30,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 3000);
     try {
-      const me = await api<AuthMe>("/api/auth/me");
-      setAuthenticated(me.authenticated);
+      // Cookie-signed session — no DB round-trip; should be well under 3s.
+      const me = await api<AuthMe>("/api/auth/me", {
+        signal: controller.signal,
+      });
+      setAuthenticated(Boolean(me.authenticated && me.user));
       setUser(me.user);
       setPermissions(me.permissions || []);
     } catch {
@@ -40,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setPermissions([]);
     } finally {
+      window.clearTimeout(timer);
       setLoading(false);
     }
   }, []);
