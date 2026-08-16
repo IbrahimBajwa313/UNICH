@@ -1015,6 +1015,7 @@ async function seed() {
     createdAt: Date;
     customerPhone: string;
     customerName: string;
+    salesperson: string;
     payment: string;
     saleType: string;
     total: number;
@@ -1027,6 +1028,7 @@ async function seed() {
       createdAt: day(0, 14, 22),
       customerPhone: "+971 52 441 7788",
       customerName: "Sara Khalid",
+      salesperson: "Ahmad Ibrahim",
       payment: "card",
       saleType: "Remix",
       total: 150,
@@ -1037,6 +1039,7 @@ async function seed() {
       createdAt: day(0, 13, 48),
       customerPhone: "+971 58 220 3344",
       customerName: "Walk-in",
+      salesperson: "Ahmad Ibrahim",
       payment: "cash",
       saleType: "Retail",
       total: 280,
@@ -1047,6 +1050,7 @@ async function seed() {
       createdAt: day(0, 12, 10),
       customerPhone: "+971 55 987 1122",
       customerName: "Omar Hassan",
+      salesperson: "Ahmad Ibrahim",
       payment: "mixed",
       saleType: "Oil",
       total: 222,
@@ -1057,6 +1061,7 @@ async function seed() {
       createdAt: day(0, 11, 5),
       customerPhone: "+971 4 330 8899",
       customerName: "Noor Trading LLC",
+      salesperson: "Ahmad Ibrahim",
       payment: "credit",
       saleType: "Wholesale",
       total: 4200,
@@ -1067,6 +1072,7 @@ async function seed() {
       createdAt: day(0, 10, 32),
       customerPhone: "+971 50 123 4567",
       customerName: "Fatima Al Mazrouei",
+      salesperson: "Ahmad Ibrahim",
       payment: "bank",
       saleType: "Refill",
       total: 135,
@@ -1093,6 +1099,7 @@ async function seed() {
         createdAt: day(offset, 16, 0),
         customerPhone: "+971 58 220 3344",
         customerName: "Walk-in",
+        salesperson: "Ahmad Ibrahim",
         payment: "cash",
         saleType: "Retail",
         total: m.retail,
@@ -1103,6 +1110,7 @@ async function seed() {
         createdAt: day(offset, 15, 0),
         customerPhone: "+971 4 330 8899",
         customerName: "Noor Trading LLC",
+        salesperson: "Ahmad Ibrahim",
         payment: "credit",
         saleType: "Wholesale",
         total: m.wholesale,
@@ -1113,6 +1121,7 @@ async function seed() {
         createdAt: day(offset, 14, 0),
         customerPhone: "+971 52 441 7788",
         customerName: "Sara Khalid",
+        salesperson: "Ahmad Ibrahim",
         payment: "card",
         saleType: "Remix",
         total: m.remix,
@@ -1122,8 +1131,15 @@ async function seed() {
     );
   }
 
+  // CRM-02: stamp customerId like the real createSale() flow does, so
+  // purchase history queries by customerId find this seed data too.
+  const custByPhone = new Map(customers.map((c) => [c.phone, c._id]));
   for (const s of salesSeed) {
-    await Sale.create({ ...s, status: "completed" });
+    await Sale.create({
+      ...s,
+      status: "completed",
+      customerId: custByPhone.get(s.customerPhone),
+    });
   }
 
   await Expense.insertMany([

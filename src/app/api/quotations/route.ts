@@ -3,10 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Quotation } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapQuote(q: Record<string, unknown>) {
   return {
@@ -31,10 +28,10 @@ export async function GET(req: Request) {
       status && status !== "all" ? { status } : {};
     // QTN-01: customer profile pulls its own open/converted quotations by phone.
     if (phone) {
-      const digits = phone.replace(/\D/g, "");
+      const digits = phoneDigits(phone);
       filter.customerPhone =
         digits.length >= 7
-          ? { $regex: escapeRegex(digits) }
+          ? { $regex: loosePhoneRegex(digits) }
           : { $regex: escapeRegex(phone), $options: "i" };
     }
     const quotations = await Quotation.find(filter).sort({ date: -1 });

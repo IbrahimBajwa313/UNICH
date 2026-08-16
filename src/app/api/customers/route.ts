@@ -3,15 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
-
-/** CRM-11: duplicate-safe phone match ignores spacing/+/country-code punctuation. */
-function normalizedDigits(value: string) {
-  return value.replace(/\D/g, "");
-}
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapCustomer(c: Record<string, unknown>) {
   return {
@@ -33,14 +25,14 @@ export async function GET(req: Request) {
     const filter: Record<string, unknown> = {};
     if (q) {
       const safe = escapeRegex(q);
-      const digits = q.replace(/\D/g, "");
+      const digits = phoneDigits(q);
       const or: Record<string, unknown>[] = [
         { name: { $regex: safe, $options: "i" } },
         { phone: { $regex: safe, $options: "i" } },
       ];
       // Match phones saved with/without +, spaces, or country code extras.
       if (digits.length >= 7) {
-        or.push({ phone: { $regex: escapeRegex(digits) } });
+        or.push({ phone: { $regex: loosePhoneRegex(digits) } });
       }
       filter.$or = or;
     }
@@ -65,11 +57,11 @@ export async function POST(req: Request) {
     // CRM-11: block accidental duplicates on phone/email unless the caller
     // already confirmed "Create New" after seeing the match.
     if (!body.forceCreate) {
-      const phoneDigits = normalizedDigits(String(body.phone || ""));
+      const digits = phoneDigits(String(body.phone || ""));
       const email = String(body.email || "").trim().toLowerCase();
       const or: Record<string, unknown>[] = [];
-      if (phoneDigits.length >= 7) {
-        or.push({ phone: { $regex: escapeRegex(phoneDigits) } });
+      if (digits.length >= 7) {
+        or.push({ phone: { $regex: loosePhoneRegex(digits) } });
       }
       if (email) {
         or.push({ email: { $regex: `^${escapeRegex(email)}$`, $options: "i" } });

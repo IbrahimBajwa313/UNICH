@@ -59,7 +59,9 @@ export default function CustomersPage() {
     activeId ? `/api/formulas?customerId=${activeId}` : null,
   );
   const { data: customerSales, loading: salesLoading } = useApiData<CustomerSale[]>(
-    activeId ? `/api/sales?customerId=${activeId}&status=all&limit=10` : null,
+    selected
+      ? `/api/sales?customerId=${activeId}&phone=${encodeURIComponent(selected.phone)}&status=all&limit=10`
+      : null,
   );
   const { data: customerQuotes, loading: quotesLoading } = useApiData<Quotation[]>(
     selected ? `/api/quotations?phone=${encodeURIComponent(selected.phone)}` : null,

@@ -6,6 +6,7 @@ import { SaleError } from "@/lib/sales/errors";
 import { warmSaleCaches } from "@/lib/sales/validateSale";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapSale(s: Record<string, unknown>) {
   const createdAt = s.createdAt ? new Date(s.createdAt as string) : new Date();
@@ -40,35 +41,53 @@ export async function GET(req: Request) {
     const status = searchParams.get("status") || "completed";
     const phone = searchParams.get("phone")?.trim();
     const customerId = searchParams.get("customerId")?.trim();
-    const filter: Record<string, unknown> =
-      status === "all"
-        ? {}
-        : { status: status as "completed" | "held" | "void" };
+    // Conditions are AND-ed via $and so the branch-isolation $or and the
+    // customer-match $or (when both customerId and phone are given) can coexist.
+    const conditions: Record<string, unknown>[] = [];
+    if (status !== "all") {
+      conditions.push({ status: status as "completed" | "held" | "void" });
+    }
     if (
       access &&
       "role" in access &&
       access.role !== "super_admin" &&
       access.branchId
     ) {
-      filter.$or = [
-        { branchId: access.branchId },
-        { branchId: null },
-        { branchId: { $exists: false } },
-      ];
+      conditions.push({
+        $or: [
+          { branchId: access.branchId },
+          { branchId: null },
+          { branchId: { $exists: false } },
+        ],
+      });
     }
-    if (customerId) {
-      filter.customerId = customerId;
+    if (customerId && phone) {
+      // CRM-02: purchase history — match either the linked customerId or the
+      // phone on record, since historical/seeded sales may only carry a phone.
+      const digits = phoneDigits(phone);
+      conditions.push({
+        $or: [
+          { customerId },
+          {
+            customerPhone:
+              digits.length >= 7
+                ? { $regex: loosePhoneRegex(digits) }
+                : { $regex: escapeRegex(phone), $options: "i" },
+          },
+        ],
+      });
+    } else if (customerId) {
+      conditions.push({ customerId });
     } else if (phone) {
-      const digits = phone.replace(/\D/g, "");
-      if (digits.length >= 7) {
-        // Escape regex metacharacters (e.g. leading + in +971…)
-        const safeDigits = digits.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        filter.customerPhone = { $regex: safeDigits };
-      } else {
-        const safe = phone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        filter.customerPhone = { $regex: safe, $options: "i" };
-      }
+      const digits = phoneDigits(phone);
+      conditions.push({
+        customerPhone:
+          digits.length >= 7
+            ? { $regex: loosePhoneRegex(digits) }
+            : { $regex: escapeRegex(phone), $options: "i" },
+      });
     }
+    const filter = conditions.length > 0 ? { $and: conditions } : {};
     const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
       .limit(limit)

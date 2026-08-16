@@ -6,6 +6,7 @@ import {
   restoreFifo,
 } from "@/lib/inventory";
 import { AppSettings, Customer, Sale } from "@/lib/models";
+import { loosePhoneRegex, phoneDigits } from "@/lib/phone";
 import { SaleError } from "@/lib/sales/errors";
 import {
   validateSaleLines,
@@ -104,6 +105,68 @@ async function resolveSalesperson(value?: string) {
     "VALIDATION",
     "Set an active salesperson in Settings → Sales Team",
   );
+}
+
+/** CRM-02/CRM-12: capture what a customer buys at order time — no manual re-entry in CRM. */
+function productNamesFromLines(lines: ValidatedSaleLine[]): string[] {
+  const names = new Set<string>();
+  for (const l of lines) {
+    const name = l.name?.trim();
+    if (name) names.add(name);
+  }
+  return [...names];
+}
+
+type CustomerTouchUpdate = {
+  $set?: Record<string, unknown>;
+  $inc?: Record<string, unknown>;
+  $addToSet?: Record<string, unknown>;
+};
+
+/**
+ * CRM-11: match the existing customer by phone (format-tolerant — "+971 50 123 4567"
+ * and "971501234567" are the same person) before creating a new profile, so the same
+ * person's orders on different dates (e.g. the 12th and the 19th) land in one history
+ * instead of splitting across duplicate customers.
+ */
+async function resolveCustomerByPhone(
+  phone: string,
+  givenName: string | undefined,
+  update: CustomerTouchUpdate,
+): Promise<mongoose.Types.ObjectId> {
+  const digits = phoneDigits(phone);
+  const filter =
+    digits.length >= 7 ? { phone: { $regex: loosePhoneRegex(digits) } } : { phone };
+
+  const existing = await Customer.findOne(filter).select("_id");
+  if (existing) {
+    await Customer.updateOne({ _id: existing._id }, update, {
+      writeConcern: FAST_WC,
+    });
+    return existing._id as mongoose.Types.ObjectId;
+  }
+
+  const created = await Customer.findOneAndUpdate(
+    { phone },
+    {
+      $setOnInsert: {
+        phone,
+        preferences: [] as string[],
+        ...(givenName ? {} : { name: "Walk-in Customer" }),
+      },
+      ...update,
+    },
+    {
+      upsert: true,
+      returnDocument: "after",
+      setDefaultsOnInsert: true,
+      writeConcern: FAST_WC,
+    },
+  );
+  if (!created) {
+    throw new SaleError("VALIDATION", "Could not resolve customer");
+  }
+  return created._id as mongoose.Types.ObjectId;
 }
 
 function coalesceDeductions(
@@ -290,6 +353,7 @@ async function holdSale(input: CreateSaleInput) {
     input.customerId && mongoose.isValidObjectId(input.customerId)
       ? input.customerId
       : null;
+  const productNames = productNamesFromLines(lines);
 
   let customerId: mongoose.Types.ObjectId;
   if (knownId) {
@@ -298,33 +362,21 @@ async function holdSale(input: CreateSaleInput) {
       { _id: customerId },
       {
         ...(givenName ? { $set: { name: givenName } } : {}),
+        ...(productNames.length > 0
+          ? { $addToSet: { productsRequested: { $each: productNames } } }
+          : {}),
       },
       { writeConcern: FAST_WC },
     ).catch(() => {
       /* non-blocking */
     });
   } else {
-    const customer = await Customer.findOneAndUpdate(
-      { phone },
-      {
-        $setOnInsert: {
-          phone,
-          preferences: [],
-          ...(givenName ? {} : { name: "Walk-in Customer" }),
-        },
-        ...(givenName ? { $set: { name: givenName } } : {}),
-      },
-      {
-        upsert: true,
-        returnDocument: "after",
-        setDefaultsOnInsert: true,
-        writeConcern: FAST_WC,
-      },
-    );
-    if (!customer) {
-      throw new SaleError("VALIDATION", "Could not resolve customer for hold");
-    }
-    customerId = customer._id as mongoose.Types.ObjectId;
+    customerId = await resolveCustomerByPhone(phone, givenName, {
+      ...(givenName ? { $set: { name: givenName } } : {}),
+      ...(productNames.length > 0
+        ? { $addToSet: { productsRequested: { $each: productNames } } }
+        : {}),
+    });
   }
 
   const displayName = givenName || "Walk-in Customer";
@@ -377,12 +429,13 @@ async function rollbackAudit(audit: DeductionAuditEntry[]) {
 }
 
 async function rollbackCustomerTotals(
-  phone: string,
+  customerId: mongoose.Types.ObjectId | null,
   subtotal: number,
   payment: string,
 ) {
+  if (!customerId) return;
   await Customer.updateOne(
-    { phone },
+    { _id: customerId },
     {
       $inc: {
         totalPurchases: -subtotal,
@@ -434,6 +487,7 @@ export async function createSale(input: CreateSaleInput) {
     totalPurchases: validated.subtotal,
     ...(payment === "credit" ? { creditBalance: validated.subtotal } : {}),
   };
+  const productNames = productNamesFromLines(validated.lines);
 
   let audit: DeductionAuditEntry[] = [];
   let customerTouched = false;
@@ -452,6 +506,10 @@ export async function createSale(input: CreateSaleInput) {
             ...(givenName ? { name: givenName } : {}),
           },
           $inc: customerInc,
+          // CRM-02/CRM-12: what they bought becomes "Products Requested" automatically.
+          ...(productNames.length > 0
+            ? { $addToSet: { productsRequested: { $each: productNames } } }
+            : {}),
         },
         { writeConcern: FAST_WC },
       ).then(() => {
@@ -466,38 +524,24 @@ export async function createSale(input: CreateSaleInput) {
       ]);
       audit = deductionAudit;
     } else {
-      const [deductionAudit, customer] = await Promise.all([
+      const [deductionAudit, resolvedCustomerId] = await Promise.all([
         validated.deductions.length > 0
           ? applyDeductions(validated.deductions)
           : Promise.resolve([] as DeductionAuditEntry[]),
-        Customer.findOneAndUpdate(
-          { phone },
-          {
-            $setOnInsert: {
-              phone,
-              preferences: [] as string[],
-              ...(givenName ? {} : { name: "Walk-in Customer" }),
-            },
-            $set: {
-              lastVisit: new Date(),
-              ...(givenName ? { name: givenName } : {}),
-            },
-            $inc: customerInc,
+        resolveCustomerByPhone(phone, givenName, {
+          $set: {
+            lastVisit: new Date(),
+            ...(givenName ? { name: givenName } : {}),
           },
-          {
-            upsert: true,
-            returnDocument: "after",
-            setDefaultsOnInsert: true,
-            writeConcern: FAST_WC,
-          },
-        ),
+          $inc: customerInc,
+          ...(productNames.length > 0
+            ? { $addToSet: { productsRequested: { $each: productNames } } }
+            : {}),
+        }),
       ]);
       audit = deductionAudit;
       customerTouched = true;
-      if (!customer) {
-        throw new SaleError("VALIDATION", "Could not resolve customer");
-      }
-      customerObjectId = customer._id as mongoose.Types.ObjectId;
+      customerObjectId = resolvedCustomerId;
     }
 
     const tStock = Date.now();
@@ -532,7 +576,7 @@ export async function createSale(input: CreateSaleInput) {
         if (dup) {
           if (audit.length) await rollbackAudit(audit);
           if (customerTouched) {
-            await rollbackCustomerTotals(phone, validated.subtotal, payment);
+            await rollbackCustomerTotals(customerObjectId, validated.subtotal, payment);
           }
           return {
             sale: { ...dup, id: String(dup._id) },
@@ -577,7 +621,7 @@ export async function createSale(input: CreateSaleInput) {
       if (dup) {
         if (audit.length) await rollbackAudit(audit);
         if (customerTouched) {
-          await rollbackCustomerTotals(phone, validated.subtotal, payment);
+          await rollbackCustomerTotals(customerObjectId, validated.subtotal, payment);
         }
         return {
           sale: { ...dup, id: String(dup._id) },
@@ -587,7 +631,7 @@ export async function createSale(input: CreateSaleInput) {
     }
     if (audit.length) await rollbackAudit(audit);
     if (customerTouched) {
-      await rollbackCustomerTotals(phone, validated.subtotal, payment);
+      await rollbackCustomerTotals(customerObjectId, validated.subtotal, payment);
     }
     throw err;
   }
