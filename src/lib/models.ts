@@ -681,3 +681,13 @@ const UserSchema = new Schema(
 
 export const Branch = models.Branch || model("Branch", BranchSchema);
 export const User = models.User || model("User", UserSchema);
+
+/** Login rate-limit sliding window — one document per key (ip:X or email:X). */
+const RateLimitSchema = new Schema({
+  key: { type: String, required: true, unique: true },
+  attempts: [{ type: Date }],
+  expiresAt: { type: Date, required: true },
+});
+RateLimitSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+export const RateLimit = models.RateLimit || model("RateLimit", RateLimitSchema);

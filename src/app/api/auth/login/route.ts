@@ -5,6 +5,12 @@ import {
 } from "@/lib/auth/bootstrap";
 import { mapUserPublic } from "@/lib/auth/mapUser";
 import { verifyPassword } from "@/lib/auth/password";
+import {
+  checkLoginRateLimit,
+  clearLoginAttempts,
+  recordFailedLogin,
+} from "@/lib/auth/rateLimit";
+import { RATE_LIMIT, WARN_REMAINING } from "@/lib/auth/rateLimitConfig";
 import { permissionsForRole, ROLE_LABELS } from "@/lib/auth/roles";
 import {
   applySessionCookie,
@@ -14,14 +20,20 @@ import { AUTH_TIMEOUT_MS, withAuthTimeout } from "@/lib/auth/timeout";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models";
 
-async function loginHandler(req: Request) {
-  // Bootstrap only once per process; otherwise just ensure DB pool is ready.
-  if (isAuthBootstrapped()) {
-    await connectDB();
-  } else {
-    await ensureAuthBootstrap();
+function rateLimitHeaders(remaining: number, resetAt: Date, retryAfterSec?: number) {
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(RATE_LIMIT.account.maxAttempts),
+    "X-RateLimit-Remaining": String(remaining),
+    "X-RateLimit-Reset": String(Math.ceil(resetAt.getTime() / 1000)),
+  };
+  if (retryAfterSec !== undefined) {
+    headers["Retry-After"] = String(retryAfterSec);
   }
+  return headers;
+}
 
+async function loginHandler(req: Request) {
+  // Parse body first — no DB needed.
   const body = (await req.json().catch(() => ({}))) as {
     email?: string;
     password?: string;
@@ -36,32 +48,59 @@ async function loginHandler(req: Request) {
     );
   }
 
-  // Lean + projected fields — one round-trip, no full document hydrate.
-  const user = await User.findOne({ email })
-    .select(
-      "name email passwordHash role roleLabel branchId branchName active",
-    )
-    .lean();
+  // Open DB connection once (shared by rate limit + user lookup below).
+  if (isAuthBootstrapped()) {
+    await connectDB();
+  } else {
+    await ensureAuthBootstrap();
+  }
 
-  if (!user || user.active === false) {
+  // Rate limit check and user lookup run in parallel — zero extra latency.
+  const [rl, user] = await Promise.all([
+    checkLoginRateLimit(email),
+    User.findOne({ email })
+      .select("name email passwordHash role roleLabel branchId branchName active")
+      .lean(),
+  ]);
+
+  if (rl.blocked) {
     return NextResponse.json(
-      { error: "Invalid email or password." },
-      { status: 401 },
+      { error: "Too many failed login attempts. Please try again later." },
+      {
+        status: 429,
+        headers: rateLimitHeaders(0, rl.resetAt, rl.retryAfterSec),
+      },
     );
   }
 
-  if (!verifyPassword(password, user.passwordHash as string)) {
+  const credentialsOk =
+    user &&
+    user.active !== false &&
+    verifyPassword(password, user.passwordHash as string);
+
+  if (!credentialsOk) {
+    void recordFailedLogin(email);
+
+    const remaining = Math.max(0, rl.remaining - 1);
     return NextResponse.json(
-      { error: "Invalid email or password." },
-      { status: 401 },
+      {
+        error: "Invalid email or password.",
+        ...(remaining <= WARN_REMAINING && { attemptsRemaining: remaining }),
+      },
+      {
+        status: 401,
+        headers: rateLimitHeaders(remaining, rl.resetAt),
+      },
     );
   }
+
+  // Successful login — clear account counter and issue session cookie.
+  void clearLoginAttempts(email);
 
   const role = user.role as keyof typeof ROLE_LABELS;
   const roleLabel =
     (user.roleLabel as string) || ROLE_LABELS[role] || String(user.role);
 
-  // Don't block the response on lastLoginAt write.
   void User.updateOne(
     { _id: user._id },
     {

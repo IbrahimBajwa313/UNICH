@@ -1,11 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { api } from "@/lib/api";
 import { AUTH_TIMEOUT_MS } from "@/lib/auth/timeout";
+import { WARN_REMAINING } from "@/lib/auth/rateLimitConfig";
+
+// Persisted across refresh so a locked-out user can't dodge the countdown by reloading.
+const LOCKOUT_STORAGE_KEY = "unich_login_lockout";
 
 export default function LoginClient() {
   const search = useSearchParams();
@@ -16,33 +19,145 @@ export default function LoginClient() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Rate limit state
+  const [retryUntil, setRetryUntil] = useState<number | null>(null); // epoch ms
+  const [retryIn, setRetryIn] = useState(0); // seconds remaining
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function persistLockout(untilMs: number, forEmail: string) {
+    try {
+      window.localStorage.setItem(
+        LOCKOUT_STORAGE_KEY,
+        JSON.stringify({ email: forEmail, retryUntil: untilMs }),
+      );
+    } catch {
+      // storage unavailable (private mode, etc.) — countdown still works in-memory
+    }
+  }
+
+  function clearPersistedLockout() {
+    try {
+      window.localStorage.removeItem(LOCKOUT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  // Restore an in-progress lockout after a page refresh instead of letting the
+  // countdown silently reset to 0. localStorage doesn't exist during SSR, so
+  // this one-time sync from an external store has to happen post-mount.
   useEffect(() => {
-    // Warm Next compile + Mongo pool while the user types credentials.
+    try {
+      const raw = window.localStorage.getItem(LOCKOUT_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { email?: string; retryUntil?: number };
+      if (saved.retryUntil && saved.retryUntil > Date.now()) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setRetryUntil(saved.retryUntil);
+        setAttemptsRemaining(0);
+        if (saved.email) setEmail(saved.email);
+      } else {
+        clearPersistedLockout();
+      }
+    } catch {
+      // malformed storage — ignore and start fresh
+    }
+  }, []);
+
+  // Countdown tick
+  useEffect(() => {
+    if (!retryUntil) return;
+
+    function tick() {
+      const secs = Math.ceil(((retryUntil as number) - Date.now()) / 1000);
+      if (secs <= 0) {
+        setRetryUntil(null);
+        setRetryIn(0);
+        setError(null);
+        clearPersistedLockout();
+        if (timerRef.current) clearInterval(timerRef.current);
+      } else {
+        setRetryIn(secs);
+      }
+    }
+
+    tick();
+    timerRef.current = setInterval(tick, 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [retryUntil]);
+
+  useEffect(() => {
     void fetch("/api/health", { cache: "no-store" }).catch(() => {});
   }, []);
 
+  function formatCountdown(secs: number) {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+
+  const isRateLimited = retryUntil !== null && retryIn > 0;
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+
+    // Frontend guard: don't even hit the server if we know we're blocked.
+    if (isRateLimited) return;
+
     setError(null);
+    setAttemptsRemaining(null);
     setBusy(true);
+
     const controller = new AbortController();
-    const timer = window.setTimeout(
-      () => controller.abort(),
-      AUTH_TIMEOUT_MS,
-    );
+    const timer = window.setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
+
     try {
-      await api("/api/auth/login", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
         signal: controller.signal,
+        cache: "no-store",
       });
-      // Hard navigation so the new HttpOnly cookie is on the next document
-      // request. Soft router.replace often bounced users back to /login once.
+
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        attemptsRemaining?: number;
+      };
+
+      if (res.status === 429) {
+        const retryAfter = parseInt(res.headers.get("Retry-After") || "900", 10);
+        const until = Date.now() + retryAfter * 1000;
+        setRetryUntil(until);
+        setAttemptsRemaining(0);
+        setError(null); // countdown banner replaces error
+        persistLockout(until, email);
+        return;
+      }
+
+      if (!res.ok) {
+        setError(data.error || `Login failed (${res.status})`);
+
+        // Sync remaining attempts from backend header
+        const headerRemaining = res.headers.get("X-RateLimit-Remaining");
+        const remaining =
+          data.attemptsRemaining ??
+          (headerRemaining !== null ? parseInt(headerRemaining, 10) : null);
+        setAttemptsRemaining(remaining !== null && remaining <= WARN_REMAINING ? remaining : null);
+        return;
+      }
+
+      // Success — hard navigate so the HttpOnly cookie is sent on the next request.
       const dest = from.startsWith("/") && !from.startsWith("//") ? from : "/";
       window.location.assign(dest);
     } catch (err) {
-      const aborted =
-        err instanceof DOMException && err.name === "AbortError";
+      const aborted = err instanceof DOMException && err.name === "AbortError";
       setError(
         aborted
           ? "Login is taking too long (>3s). Check your connection and try again."
@@ -50,9 +165,9 @@ export default function LoginClient() {
             ? err.message
             : "Login failed",
       );
-      setBusy(false);
     } finally {
       window.clearTimeout(timer);
+      setBusy(false);
     }
   }
 
@@ -93,6 +208,7 @@ export default function LoginClient() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@unich.com"
             required
+            disabled={isRateLimited}
           />
           <Input
             label="Password"
@@ -102,21 +218,46 @@ export default function LoginClient() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
             required
+            disabled={isRateLimited}
           />
 
-          {error ? (
-            <p className="rounded-lg border border-coral/30 bg-coral/10 px-3 py-2 text-sm text-coral">
-              {error}
+          {/* Rate limited — show countdown */}
+          {isRateLimited ? (
+            <p className="rounded-lg border border-amber-300/40 bg-amber-50/60 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-900/20 dark:text-amber-400">
+              Too many failed attempts. Try again in{" "}
+              <span className="font-semibold tabular-nums">
+                {formatCountdown(retryIn)}
+              </span>
+              .
             </p>
-          ) : null}
+          ) : (
+            <>
+              {/* Low attempts warning */}
+              {attemptsRemaining !== null && attemptsRemaining > 0 && (
+                <p className="rounded-lg border border-amber-300/40 bg-amber-50/60 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-900/20 dark:text-amber-400">
+                  Warning:{" "}
+                  <span className="font-semibold">{attemptsRemaining}</span>{" "}
+                  {attemptsRemaining === 1 ? "attempt" : "attempts"} remaining
+                  before temporary lockout.
+                </p>
+              )}
+
+              {/* Regular error */}
+              {error ? (
+                <p className="rounded-lg border border-coral/30 bg-coral/10 px-3 py-2 text-sm text-coral">
+                  {error}
+                </p>
+              ) : null}
+            </>
+          )}
 
           <Button
             type="submit"
             variant="gold"
             className="w-full"
-            disabled={busy}
+            disabled={busy || isRateLimited}
           >
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? "Logging in…" : isRateLimited ? `Locked (${formatCountdown(retryIn)})` : "Login"}
           </Button>
         </form>
       </div>
