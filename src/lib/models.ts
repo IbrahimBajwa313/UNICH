@@ -66,6 +66,12 @@ const CustomerSchema = new Schema(
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true, index: true },
     email: String,
+    /** CRM-01: captured once confirmed with the customer, not required at intake. */
+    address: { type: String, default: "" },
+    vatNumber: { type: String, default: "" },
+    /** CRM-12 minimum-intake field alongside name/phone. */
+    productsRequested: [{ type: String }],
+    notes: { type: String, default: "" },
     preferences: [{ type: String }],
     totalPurchases: { type: Number, default: 0 },
     lastVisit: { type: Date },
@@ -214,6 +220,8 @@ const PurchaseOrderSchema = new Schema(
     itemCount: { type: Number, required: true, default: 0 },
     lines: { type: [PurchaseOrderLineSchema], default: [] },
     notes: String,
+    /** PUR-12: set once, first time status reaches "received" — feeds Supplier.avgLeadDays. */
+    receivedAt: { type: Date, default: null },
     /** BRN-08 branch isolation */
     branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
     branchName: String,

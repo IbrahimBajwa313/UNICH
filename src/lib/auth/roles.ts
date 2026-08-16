@@ -71,12 +71,12 @@ const ACCOUNTANT_PERMS: Permission[] = [
   "expenses:write",
 ];
 
+/** PUR-04: purchase creation/receipt is owner/admin only — Inventory may view but not commit spend. */
 const INVENTORY_PERMS: Permission[] = [
   "dashboard:read",
   "inventory:read",
   "inventory:write",
   "purchases:read",
-  "purchases:write",
 ];
 
 /** Admin: ops + formulas + users (branch-scoped). Not full branch CRUD. */

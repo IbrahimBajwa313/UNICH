@@ -10,6 +10,7 @@ import {
   mapFormula,
   mapFormulaPublic,
 } from "@/lib/formulas/mapFormula";
+import { fillDefaultRemixPackaging } from "@/lib/formulas/defaultPackaging";
 import { validateFormulaInput } from "@/lib/formulas/validateFormula";
 import { Formula } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
@@ -84,6 +85,13 @@ export async function POST(req: Request) {
 
     await connectDB();
     const body = await req.json();
+
+    // BLD-02/BLD-08: customer blends may omit packaging — fill from the
+    // canonical default remix template before validating completeness.
+    if (body.type === "remix" && Array.isArray(body.components)) {
+      body.components = await fillDefaultRemixPackaging(body.components);
+    }
+
     const errors = validateFormulaInput({
       name: body.name,
       type: body.type,

@@ -6,6 +6,7 @@ import {
   derivePurchaseStatus,
   syncReceivedQtys,
 } from "@/lib/purchases/applyFifoFromPurchase";
+import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
@@ -110,7 +111,16 @@ export async function POST(req: Request) {
     if (status === "received" || status === "partial") {
       await applyFifoFromPurchase(purchase);
       purchase.markModified("lines");
+    }
+    // PUR-12: first time a PO lands fully received, stamp it and refresh supplier lead time.
+    if (status === "received" && !purchase.receivedAt) {
+      purchase.receivedAt = new Date();
+    }
+    if (purchase.isModified()) {
       await purchase.save();
+    }
+    if (status === "received") {
+      void recalcSupplierAvgLeadDays(String(purchase.supplierId));
     }
 
     return NextResponse.json(mapPO(toJSON(purchase)!), { status: 201 });

@@ -1,6 +1,9 @@
 import {
+  matchRemixRole,
   OIL_BASE_PRODUCT_ID,
   REMIX_OIL_ML,
+  REMIX_REQUIRED_ROLES,
+  roleLabel,
 } from "@/lib/sales/constants";
 import type { FormulaComponent, StockUnit } from "@/lib/types";
 
@@ -66,12 +69,41 @@ export function validateFormulaInput(input: FormulaValidationInput): string[] {
 
   if (input.type === "remix") {
     const oilBase = components.find((c) => c.productId === OIL_BASE_PRODUCT_ID);
-    const oilQty = Number(oilBase?.qty);
-    if (!oilBase || !Number.isFinite(oilQty) || oilQty <= 0) {
-      errors.push("Remix requires oil-base (Selected Oil Blend) quantity");
-    } else if (oilQty !== REMIX_OIL_ML) {
+    if (oilBase) {
+      // Generic/catalog remix — POS picks the oil at sale time via the placeholder.
+      const oilQty = Number(oilBase.qty);
+      if (!Number.isFinite(oilQty) || oilQty <= 0 || oilQty !== REMIX_OIL_ML) {
+        errors.push(
+          `Remix oil-base must be ${REMIX_OIL_ML} ml (BLD-02/03) — got ${oilQty} ml`,
+        );
+      }
+    } else {
+      // BLD-08 customer blend — concrete oils in place of the placeholder,
+      // must still total the fixed 20 ml (BLD-03), not tola-math.
+      const oilMl = components
+        .filter((c) => c.unit === "ml" && !matchRemixRole(c.productName))
+        .reduce((sum, c) => sum + (Number(c.qty) || 0), 0);
+      if (oilMl <= 0) {
+        errors.push("Remix requires oil-base or at least one concrete oil ingredient");
+      } else if (Math.abs(oilMl - REMIX_OIL_ML) > 0.001) {
+        errors.push(
+          `Remix oil total must be ${REMIX_OIL_ML} ml (BLD-02/03) — got ${oilMl} ml`,
+        );
+      }
+    }
+
+    // BLD-02: every remix (generic or customer blend) must carry the full
+    // packaging BOM — this is what makes a formula self-contained and
+    // production-ready instead of silently depending on another formula.
+    const foundRoles = new Set(
+      components
+        .map((c) => matchRemixRole(c.productName))
+        .filter((r): r is (typeof REMIX_REQUIRED_ROLES)[number] => Boolean(r)),
+    );
+    const missingRoles = REMIX_REQUIRED_ROLES.filter((r) => !foundRoles.has(r));
+    if (missingRoles.length) {
       errors.push(
-        `Remix oil-base must be ${REMIX_OIL_ML} ml (BLD-02/03) — got ${oilQty} ml`,
+        `Remix formula incomplete: ${missingRoles.map(roleLabel).join(", ")} missing (BLD-02)`,
       );
     }
   }

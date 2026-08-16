@@ -77,6 +77,15 @@ export async function planProduction(input: {
       "Only approved formulas can be used for production",
     );
   }
+  // Guards against legacy/imported data whose type predates the remix/oil/bakhoor
+  // enum (BLD-02) — fail with an actionable message instead of a raw Mongoose
+  // enum error when ProductionOrder.formulaType is later saved.
+  if (!["remix", "oil", "bakhoor"].includes(formula.type)) {
+    throw new SaleError(
+      "VALIDATION",
+      `Formula "${formula.name}" has an unsupported type ("${formula.type}"). Open it in Formulas, re-save with a valid type (Remix, Oil, or Bakhoor), then retry production.`,
+    );
+  }
 
   const hasOilBase = formula.components.some(
     (c) => String(c.productId) === OIL_BASE_PRODUCT_ID,

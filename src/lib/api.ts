@@ -22,9 +22,12 @@ export async function api<T>(
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(
+    const error = new Error(
       (data as { error?: string }).error || `Request failed (${res.status})`,
-    );
+    ) as Error & { status?: number; data?: unknown };
+    error.status = res.status;
+    error.data = data;
+    throw error;
   }
   return data as T;
 }

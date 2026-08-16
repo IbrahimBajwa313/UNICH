@@ -4,6 +4,11 @@ import { Customer } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
+/** CRM-11: duplicate-safe phone match ignores spacing/+/country-code punctuation. */
+function normalizedDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -56,6 +61,34 @@ export async function POST(req: Request) {
 
     await connectDB();
     const body = await req.json();
+
+    // CRM-11: block accidental duplicates on phone/email unless the caller
+    // already confirmed "Create New" after seeing the match.
+    if (!body.forceCreate) {
+      const phoneDigits = normalizedDigits(String(body.phone || ""));
+      const email = String(body.email || "").trim().toLowerCase();
+      const or: Record<string, unknown>[] = [];
+      if (phoneDigits.length >= 7) {
+        or.push({ phone: { $regex: escapeRegex(phoneDigits) } });
+      }
+      if (email) {
+        or.push({ email: { $regex: `^${escapeRegex(email)}$`, $options: "i" } });
+      }
+      if (or.length > 0) {
+        const existing = await Customer.findOne({ $or: or });
+        if (existing) {
+          return NextResponse.json(
+            {
+              error: "duplicate",
+              message: "A customer with this phone or email already exists.",
+              existing: mapCustomer(toJSON(existing)!),
+            },
+            { status: 409 },
+          );
+        }
+      }
+    }
+
     const customer = await Customer.create({
       ...body,
       lastVisit: body.lastVisit ? new Date(body.lastVisit) : new Date(),

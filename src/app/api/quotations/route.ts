@@ -4,6 +4,10 @@ import { Quotation } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function mapQuote(q: Record<string, unknown>) {
   return {
     ...q,
@@ -22,7 +26,17 @@ export async function GET(req: Request) {
     await connectDB();
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
-    const filter = status && status !== "all" ? { status } : {};
+    const phone = searchParams.get("phone")?.trim();
+    const filter: Record<string, unknown> =
+      status && status !== "all" ? { status } : {};
+    // QTN-01: customer profile pulls its own open/converted quotations by phone.
+    if (phone) {
+      const digits = phone.replace(/\D/g, "");
+      filter.customerPhone =
+        digits.length >= 7
+          ? { $regex: escapeRegex(digits) }
+          : { $regex: escapeRegex(phone), $options: "i" };
+    }
     const quotations = await Quotation.find(filter).sort({ date: -1 });
     return NextResponse.json(toJSONList(quotations).map(mapQuote));
   } catch (error) {

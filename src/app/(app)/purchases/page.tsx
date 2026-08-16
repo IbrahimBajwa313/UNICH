@@ -7,6 +7,7 @@ import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState"
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Stat } from "@/components/ui/Stat";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { api } from "@/lib/api";
 import { formatMoney, formatDate } from "@/lib/format";
 import type { Product, PurchaseOrder, Supplier } from "@/lib/types";
@@ -27,6 +28,9 @@ type DraftLine = {
 };
 
 export default function PurchasesPage() {
+  const { hasPermission } = useAuth();
+  /** PUR-04: purchases/suppliers are owner/admin only — Inventory gets read-only view. */
+  const canWrite = hasPermission("purchases:write");
   const { data: purchases, loading, error, reload } = useApiData<PurchaseOrder[]>("/api/purchases");
   const { data: suppliers, loading: suppliersLoading, error: suppliersError, reload: reloadSuppliers } =
     useApiData<Supplier[]>("/api/suppliers");
@@ -198,26 +202,32 @@ export default function PurchasesPage() {
         title="Purchasing & Suppliers"
         description="Supplier-based purchasing with multi-currency support, credit tracking, and FIFO layer creation on goods receipt. No auto PO — suppliers change often."
         actions={
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setSupplierDraft({ currency: "AED" })}>
-              Add Supplier
-            </Button>
-            <Button
-              variant="gold"
-              onClick={() =>
-                setPurchaseDraft({
-                  supplierId: "",
-                  currency: "AED",
-                  status: "ordered",
-                  lines: [
-                    { productId: "", productName: "", sku: "", qtyOrdered: "1", unitCost: "" },
-                  ],
-                })
-              }
-            >
-              New Purchase
-            </Button>
-          </div>
+          canWrite ? (
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setSupplierDraft({ currency: "AED" })}>
+                Add Supplier
+              </Button>
+              <Button
+                variant="gold"
+                onClick={() =>
+                  setPurchaseDraft({
+                    supplierId: "",
+                    currency: "AED",
+                    status: "ordered",
+                    lines: [
+                      { productId: "", productName: "", sku: "", qtyOrdered: "1", unitCost: "" },
+                    ],
+                  })
+                }
+              >
+                New Purchase
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-ink-muted">
+              Purchasing is owner/admin only (PUR-04) — view-only for your role.
+            </p>
+          )
         }
       />
 
@@ -274,7 +284,7 @@ export default function PurchasesPage() {
                       {formatMoney(po.total, po.currency)}
                     </td>
                     <td className="px-5 py-3 text-right">
-                      {canReceive ? (
+                      {canReceive && canWrite ? (
                         <Button
                           variant="secondary"
                           disabled={busyId === po.id}

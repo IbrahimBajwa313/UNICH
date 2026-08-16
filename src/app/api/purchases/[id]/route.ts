@@ -6,6 +6,7 @@ import {
   derivePurchaseStatus,
   syncReceivedQtys,
 } from "@/lib/purchases/applyFifoFromPurchase";
+import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
 
@@ -129,7 +130,17 @@ export async function PUT(req: Request, ctx: Ctx) {
       purchase.markModified("lines");
     }
 
+    // PUR-12: first time this PO lands fully received, stamp it and refresh supplier lead time.
+    if (status === "received" && !purchase.receivedAt) {
+      purchase.receivedAt = new Date();
+    }
+
     await purchase.save();
+
+    if (status === "received") {
+      void recalcSupplierAvgLeadDays(String(purchase.supplierId));
+    }
+
     return NextResponse.json(mapPO(toJSON(purchase)!));
   } catch (error) {
     return NextResponse.json(
@@ -149,6 +160,10 @@ export async function DELETE(req: Request, ctx: Ctx) {
     const purchase = await PurchaseOrder.findByIdAndDelete(id);
     if (!purchase) {
       return NextResponse.json({ error: "Purchase not found" }, { status: 404 });
+    }
+    // PUR-12: removing a received PO shifts the supplier's lead-time average.
+    if (purchase.status === "received") {
+      void recalcSupplierAvgLeadDays(String(purchase.supplierId));
     }
     return NextResponse.json({ ok: true });
   } catch (error) {

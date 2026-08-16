@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { requireRole } from "@/lib/auth/guards";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -59,8 +60,9 @@ export async function PUT(req: Request, ctx: Ctx) {
 
 export async function DELETE(req: Request, ctx: Ctx) {
   try {
-    const access = requireApiAccess(req);
-    if (access !== null && isAuthResponse(access)) return access;
+    // CRM-12: Sales Staff may view/create/edit customers but not delete — Admin only.
+    const access = requireRole(req, ["super_admin", "admin"]);
+    if (isAuthResponse(access)) return access;
 
     await connectDB();
     const { id } = await ctx.params;

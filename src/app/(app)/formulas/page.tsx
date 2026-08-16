@@ -203,6 +203,22 @@ export default function FormulasPage() {
     () => productList.find((p) => matchRemixRole(p.name, p.sku) === "box"),
     [productList],
   );
+  const bottleProduct = useMemo(
+    () => productList.find((p) => matchRemixRole(p.name, p.sku) === "bottle"),
+    [productList],
+  );
+  const capProduct = useMemo(
+    () => productList.find((p) => matchRemixRole(p.name, p.sku) === "cap"),
+    [productList],
+  );
+  const atomizerProduct = useMemo(
+    () => productList.find((p) => matchRemixRole(p.name, p.sku) === "atomizer"),
+    [productList],
+  );
+  const collarProduct = useMemo(
+    () => productList.find((p) => matchRemixRole(p.name, p.sku) === "collar"),
+    [productList],
+  );
 
   const activeId = selectedId || formulas?.[0]?.id || "";
   const selected = formulas?.find((f) => f.id === activeId);
@@ -258,7 +274,12 @@ export default function FormulasPage() {
     });
   }
 
-  type QuickRole = "oil" | Extract<RemixRequiredRole, "ethanol" | "fixative" | "label" | "box">;
+  type QuickRole =
+    | "oil"
+    | Extract<
+        RemixRequiredRole,
+        "ethanol" | "fixative" | "label" | "box" | "bottle" | "cap" | "atomizer" | "collar"
+      >;
 
   function hasRole(role: QuickRole) {
     const comps = draft?.components || [];
@@ -271,6 +292,37 @@ export default function FormulasPage() {
     });
   }
 
+  const packagingProductByRole = {
+    ethanol: ethanolProduct,
+    fixative: fixativeProduct,
+    label: labelProduct,
+    box: boxProduct,
+    bottle: bottleProduct,
+    cap: capProduct,
+    atomizer: atomizerProduct,
+    collar: collarProduct,
+  } as const;
+  const packagingDefaultQty: Record<Exclude<QuickRole, "oil">, number> = {
+    ethanol: 80,
+    fixative: 2,
+    label: 1,
+    box: 1,
+    bottle: 1,
+    cap: 1,
+    atomizer: 1,
+    collar: 1,
+  };
+  const packagingHints: Record<Exclude<QuickRole, "oil">, string> = {
+    ethanol: "No ethanol product in inventory (name/SKU must match ETH- / Ethanol).",
+    fixative: "No fixative product in inventory (name/SKU must match FIX- / Fixative).",
+    label: "No label product in inventory (name/SKU must match LBL- / Label).",
+    box: "No box product in inventory (name/SKU must match BOX- / GB- / Box).",
+    bottle: "No bottle product in inventory (name/SKU must match BOT- / Bottle).",
+    cap: "No cap product in inventory (name/SKU must match CAP- / Cap).",
+    atomizer: "No atomizer product in inventory (name/SKU must match ATM- / Atomizer).",
+    collar: "No collar product in inventory (name/SKU must match COL- / Collar).",
+  };
+
   function addQuick(role: QuickRole) {
     if (!draft) return;
     if (hasRole(role)) return;
@@ -281,27 +333,9 @@ export default function FormulasPage() {
       });
       return;
     }
-    const productByRole = {
-      ethanol: ethanolProduct,
-      fixative: fixativeProduct,
-      label: labelProduct,
-      box: boxProduct,
-    } as const;
-    const defaultQty: Record<Exclude<QuickRole, "oil">, number> = {
-      ethanol: 80,
-      fixative: 2,
-      label: 1,
-      box: 1,
-    };
-    const hints: Record<Exclude<QuickRole, "oil">, string> = {
-      ethanol: "No ethanol product in inventory (name/SKU must match ETH- / Ethanol).",
-      fixative: "No fixative product in inventory (name/SKU must match FIX- / Fixative).",
-      label: "No label product in inventory (name/SKU must match LBL- / Label).",
-      box: "No box product in inventory (name/SKU must match BOX- / GB- / Box).",
-    };
-    const product = productByRole[role];
+    const product = packagingProductByRole[role];
     if (!product) {
-      setSaveError(hints[role]);
+      setSaveError(packagingHints[role]);
       return;
     }
     setSaveError(null);
@@ -312,11 +346,48 @@ export default function FormulasPage() {
         {
           productId: product.id,
           productName: product.name,
-          qty: defaultQty[role],
+          qty: packagingDefaultQty[role],
           unit: (product.unit as StockUnit) || "ml",
         },
       ],
     });
+  }
+
+  /** BLD-02: fill every packaging role this draft is still missing, in one shot. */
+  function addAllMissingPackaging() {
+    if (!draft) return;
+    const packagingRoles: Exclude<QuickRole, "oil">[] = [
+      "bottle",
+      "cap",
+      "atomizer",
+      "collar",
+      "label",
+      "box",
+      "ethanol",
+      "fixative",
+    ];
+    const missing = packagingRoles.filter((role) => !hasRole(role));
+    if (!missing.length) return;
+
+    const added: FormulaComponent[] = [];
+    const hints: string[] = [];
+    for (const role of missing) {
+      const product = packagingProductByRole[role];
+      if (!product) {
+        hints.push(packagingHints[role]);
+        continue;
+      }
+      added.push({
+        productId: product.id,
+        productName: product.name,
+        qty: packagingDefaultQty[role],
+        unit: (product.unit as StockUnit) || "ml",
+      });
+    }
+    setSaveError(hints[0] || null);
+    if (added.length) {
+      setDraft({ ...draft, components: [...(draft.components || []), ...added] });
+    }
   }
 
   async function saveFormula() {
@@ -1117,6 +1188,46 @@ export default function FormulasPage() {
                     onClick={() => addQuick("box")}
                   >
                     + Box
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={hasRole("bottle") || !bottleProduct}
+                    onClick={() => addQuick("bottle")}
+                  >
+                    + Bottle
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={hasRole("cap") || !capProduct}
+                    onClick={() => addQuick("cap")}
+                  >
+                    + Cap
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={hasRole("atomizer") || !atomizerProduct}
+                    onClick={() => addQuick("atomizer")}
+                  >
+                    + Atomizer
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={hasRole("collar") || !collarProduct}
+                    onClick={() => addQuick("collar")}
+                  >
+                    + Collar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="gold"
+                    onClick={addAllMissingPackaging}
+                    title="BLD-02: fill every missing packaging role (bottle/cap/atomizer/collar/label/box/ethanol/fixative) at once"
+                  >
+                    + Fill missing packaging
                   </Button>
                   <Button
                     size="sm"

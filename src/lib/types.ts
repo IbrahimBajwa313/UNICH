@@ -147,6 +147,10 @@ export interface Customer {
   name: string;
   phone: string;
   email?: string;
+  address?: string;
+  vatNumber?: string;
+  productsRequested: string[];
+  notes?: string;
   preferences: string[];
   totalPurchases: number;
   lastVisit: string;
@@ -378,6 +382,7 @@ export interface Quotation {
   expiry: string;
   total: number;
   items: number;
+  convertedToSaleId?: string;
 }
 
 export interface SaleLine {
