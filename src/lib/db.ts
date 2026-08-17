@@ -1,18 +1,23 @@
 import dns from "node:dns";
 import mongoose from "mongoose";
 
-// Windows / local DNS resolvers often break mongodb+srv SRV lookups in Node.
-dns.setDefaultResultOrder("ipv4first");
-try {
-  dns.setServers(["8.8.8.8", "1.1.1.1"]);
-} catch {
-  // ignore if restricted
-}
-
 const MONGODB_URI = process.env.DATABASE_URL;
 
 if (!MONGODB_URI) {
   throw new Error("Missing DATABASE_URL in environment variables");
+}
+
+dns.setDefaultResultOrder("ipv4first");
+// Windows / local DNS resolvers often break mongodb+srv SRV lookups in Node.
+// Only override to public resolvers for +srv URIs — a plain mongodb:// URI
+// (explicit host list, no SRV lookup) gets no benefit from this, and forcing
+// 8.8.8.8/1.1.1.1 can itself stall/timeout on networks that block those IPs.
+if (MONGODB_URI.startsWith("mongodb+srv://")) {
+  try {
+    dns.setServers(["8.8.8.8", "1.1.1.1"]);
+  } catch {
+    // ignore if restricted
+  }
 }
 
 interface MongooseCache {

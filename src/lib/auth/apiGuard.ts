@@ -33,7 +33,9 @@ export function requireApiAccess(
     path === "/api/auth/login" ||
     path === "/api/auth/logout" ||
     path.startsWith("/api/auth/formula-admin") ||
-    path === "/api/auth/me"
+    path === "/api/auth/me" ||
+    // QTN-10: customer approval link — reachable only with the unguessable token itself.
+    path.startsWith("/api/quotations/public/")
   ) {
     return null;
   }

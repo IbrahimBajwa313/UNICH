@@ -25,6 +25,8 @@ export function formatQuotationMessage(input: {
   date?: string;
   expiry?: string;
   currency?: string;
+  /** QTN-10 — link to the public view/approval page, when the quotation has been shared. */
+  approvalUrl?: string;
 }): string {
   const money = (n: number) =>
     new Intl.NumberFormat("en-AE", {
@@ -42,6 +44,7 @@ export function formatQuotationMessage(input: {
     `Total: ${money(input.total)}`,
     input.date ? `Date: ${input.date}` : null,
     input.expiry ? `Valid until: ${input.expiry}` : null,
+    input.approvalUrl ? `View & approve: ${input.approvalUrl}` : null,
     store ? `Reply on WhatsApp: +${store}` : null,
     ``,
     `Please reply to confirm or request changes.`,
@@ -56,6 +59,7 @@ export function formatQuotationSms(input: {
   items: number;
   expiry?: string;
   currency?: string;
+  approvalUrl?: string;
 }): string {
   const currency = input.currency || "AED";
   const store = storeWhatsAppNumber();
@@ -63,6 +67,7 @@ export function formatQuotationSms(input: {
     `UNICH Quotation ${input.number}:`,
     `${input.items} item(s) · ${currency} ${input.total.toFixed(2)}`,
     input.expiry ? `valid until ${input.expiry}` : "",
+    input.approvalUrl ? `View: ${input.approvalUrl}` : "",
     store ? `Reply: +${store}` : "",
   ]
     .filter(Boolean)

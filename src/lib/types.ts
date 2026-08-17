@@ -78,7 +78,8 @@ export type QuotationStatus =
   | "revised"
   | "approved"
   | "rejected"
-  | "expired";
+  | "expired"
+  | "converted";
 
 export interface Product {
   id: string;
@@ -372,17 +373,158 @@ export type InventoryAdjustmentReason =
   | "restock"
   | "adjustment";
 
+export type QuotationLineType =
+  | "ready"
+  | "remix"
+  | "oil"
+  | "refill"
+  | "packaging"
+  | "wholesale"
+  | "custom_blend";
+
+export interface QuotationLine {
+  productId?: string;
+  name: string;
+  qty: number;
+  unitLabel: string;
+  unitPrice: number;
+  lineType: QuotationLineType;
+  /** QTN-09 custom-blend refs — recipe stays secret, only the link is stored. */
+  formulaId?: string;
+  formulaName?: string;
+  packagingProductIds?: string[];
+  bottleNote?: string;
+  designNote?: string;
+  charges?: number;
+  notes?: string;
+}
+
+export interface QuotationAttachment {
+  name: string;
+  mimeType: string;
+  dataBase64: string;
+  uploadedAt: string;
+}
+
+/** QTN-05 immutable snapshot captured before a revision is applied. */
+export interface QuotationVersion {
+  version: number;
+  status: QuotationStatus;
+  lines: QuotationLine[];
+  subtotal: number;
+  vatPercent: number;
+  vatAmount: number;
+  total: number;
+  paymentTerms?: string;
+  deliveryTerms?: string;
+  validityDays?: number;
+  termsText?: string;
+  notes?: string;
+  savedAt: string;
+  savedBy?: string;
+}
+
+export type QuotationAuditAction =
+  | "created"
+  | "updated"
+  | "status_changed"
+  | "revised"
+  | "shared"
+  | "converted"
+  | "customer_decision";
+
+export interface QuotationHistoryEntry {
+  at: string;
+  by?: string;
+  action: QuotationAuditAction;
+  detail?: string;
+  fromStatus?: QuotationStatus;
+  toStatus?: QuotationStatus;
+  fromVersion?: number;
+  toVersion?: number;
+}
+
 export interface Quotation {
   id: string;
   number: string;
+  customerId?: string;
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
+  customerTrn?: string;
+  customerAddress?: string;
   status: QuotationStatus;
   date: string;
   expiry: string;
+
+  lines: QuotationLine[];
+  subtotal: number;
+  vatPercent: number;
+  vatAmount: number;
   total: number;
-  items: number;
+
+  /** QTN-07 */
+  customerPoNumber?: string;
+  attachments: QuotationAttachment[];
+
+  /** QTN-03 */
+  paymentTerms?: string;
+  deliveryTerms?: string;
+  validityDays: number;
+  termsText?: string;
+  notes?: string;
+
+  /** QTN-02 */
+  signatureDataUrl?: string;
+  signedByName?: string;
+  signedAt?: string;
+
+  /** QTN-05 */
+  version: number;
+  versions: QuotationVersion[];
+  history: QuotationHistoryEntry[];
+
+  /** QTN-10 public approval link */
+  approvalToken?: string;
+  approvalTokenExpiresAt?: string;
+  publicViewedAt?: string;
+  customerDecision?: "approved" | "rejected";
+  customerDecisionAt?: string;
+  customerDecisionNote?: string;
+
   convertedToSaleId?: string;
+}
+
+/** Redacted customer-facing view served by the public approval link (QTN-10). */
+export interface PublicQuotation {
+  number: string;
+  status: QuotationStatus;
+  date: string;
+  expiry: string;
+  store: { name: string; legalName: string; address: string; phone: string; taxNumber: string; logoUrl: string; currency: string };
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  customerTrn?: string;
+  customerAddress?: string;
+  customerPoNumber?: string;
+  lines: QuotationLine[];
+  subtotal: number;
+  vatPercent: number;
+  vatAmount: number;
+  total: number;
+  paymentTerms?: string;
+  deliveryTerms?: string;
+  validityDays: number;
+  termsText?: string;
+  notes?: string;
+  signatureDataUrl?: string;
+  signedByName?: string;
+  signedAt?: string;
+  customerDecision?: "approved" | "rejected";
+  customerDecisionAt?: string;
+  customerDecisionNote?: string;
+  expired: boolean;
 }
 
 export interface SaleLine {
@@ -479,6 +621,11 @@ export interface AppSettings {
   autoPrintReceipt: boolean;
   /** Read-only: whether SMS credentials are present on the server. */
   smsConfigured?: boolean;
+  quotationNumberPrefix: string;
+  quotationDefaultValidityDays: number;
+  quotationTermsTemplate: string;
+  quotationPaymentTermsPresets: string[];
+  quotationDeliveryTermsPresets: string[];
   currentUserName: string;
   currentUserRole: string;
   currentUserRoleLabel: string;

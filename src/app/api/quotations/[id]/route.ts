@@ -1,10 +1,33 @@
+import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Quotation, Sale } from "@/lib/models";
+import { computeQuotationTotals } from "@/lib/quotation/calc";
+import { normalizeQuotationLines } from "@/lib/quotation/lines";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import type { QuotationStatus } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
+
+function mapQuote(q: Record<string, unknown>) {
+  return {
+    ...q,
+    date: q.date ? new Date(q.date as string).toISOString().slice(0, 10) : null,
+    expiry: q.expiry
+      ? new Date(q.expiry as string).toISOString().slice(0, 10)
+      : null,
+  };
+}
+
+const EDITABLE_ANY_STATUS = new Set([
+  "customerPoNumber",
+  "attachments",
+  "notes",
+  "customerEmail",
+  "customerAddress",
+  "customerTrn",
+]);
 
 export async function PUT(req: Request, ctx: Ctx) {
   try {
@@ -14,16 +37,75 @@ export async function PUT(req: Request, ctx: Ctx) {
     await connectDB();
     const { id } = await ctx.params;
     const body = await req.json();
-    if (body.date) body.date = new Date(body.date);
-    if (body.expiry) body.expiry = new Date(body.expiry);
-    const quotation = await Quotation.findByIdAndUpdate(id, body, {
-      new: true,
-      runValidators: true,
-    });
+
+    const quotation = await Quotation.findById(id);
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
     }
-    return NextResponse.json(toJSON(quotation));
+
+    // Pricing (lines/terms/VAT) can only change on a draft — anything already
+    // sent/approved must go through the `revise` action so history is preserved (QTN-05).
+    const wantsPricingChange =
+      body.lines !== undefined ||
+      body.vatPercent !== undefined ||
+      body.paymentTerms !== undefined ||
+      body.deliveryTerms !== undefined ||
+      body.validityDays !== undefined ||
+      body.termsText !== undefined;
+    if (wantsPricingChange && quotation.status !== "draft") {
+      return NextResponse.json(
+        {
+          error:
+            "This quotation is no longer a draft — use the revise action to change lines or terms.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (wantsPricingChange) {
+      if (body.lines !== undefined) quotation.lines = normalizeQuotationLines(body.lines);
+      if (body.vatPercent !== undefined) quotation.vatPercent = Number(body.vatPercent) || 0;
+      if (body.paymentTerms !== undefined) quotation.paymentTerms = body.paymentTerms;
+      if (body.deliveryTerms !== undefined) quotation.deliveryTerms = body.deliveryTerms;
+      if (body.validityDays !== undefined) quotation.validityDays = Number(body.validityDays) || 14;
+      if (body.termsText !== undefined) quotation.termsText = body.termsText;
+      const totals = computeQuotationTotals(quotation.lines, quotation.vatPercent);
+      quotation.subtotal = totals.subtotal;
+      quotation.vatAmount = totals.vatAmount;
+      quotation.total = totals.total;
+    }
+
+    if (body.customerName !== undefined) quotation.customerName = body.customerName;
+    if (body.customerPhone !== undefined) quotation.customerPhone = body.customerPhone;
+    if (body.customerId !== undefined) quotation.customerId = body.customerId || undefined;
+    if (body.date) quotation.date = new Date(body.date);
+    if (body.expiry) quotation.expiry = new Date(body.expiry);
+    for (const key of EDITABLE_ANY_STATUS) {
+      if (body[key] !== undefined) {
+        (quotation as unknown as Record<string, unknown>)[key] = body[key];
+      }
+    }
+    // QTN-02: signed in-store (e.g. tablet handed to the customer while editing a draft).
+    if (body.signatureDataUrl) {
+      quotation.signatureDataUrl = body.signatureDataUrl;
+      quotation.signedByName = body.signedByName || quotation.customerName;
+      quotation.signedAt = new Date();
+    }
+
+    if (body.status && body.status !== quotation.status) {
+      const fromStatus = quotation.status as QuotationStatus;
+      quotation.status = body.status;
+      quotation.history.push({
+        at: new Date(),
+        by: access?.name || "System",
+        action: "status_changed",
+        fromStatus,
+        toStatus: body.status,
+      });
+    }
+
+    await quotation.save();
+    return NextResponse.json(mapQuote(toJSON(quotation)!));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update quotation" },
@@ -39,10 +121,17 @@ export async function DELETE(req: Request, ctx: Ctx) {
 
     await connectDB();
     const { id } = await ctx.params;
-    const quotation = await Quotation.findByIdAndDelete(id);
+    const quotation = await Quotation.findById(id);
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
     }
+    if (quotation.convertedToSaleId) {
+      return NextResponse.json(
+        { error: "Cannot delete a quotation that has already been converted to a sale" },
+        { status: 400 },
+      );
+    }
+    await quotation.deleteOne();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
@@ -52,7 +141,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
   }
 }
 
-/** Convert approved quotation into a sale record (no stock deduct until POS checkout path). */
+/** QTN-05 revise / QTN-06 convert / QTN-10 share actions. */
 export async function POST(req: Request, ctx: Ctx) {
   try {
     const access = requireApiAccess(req);
@@ -65,6 +154,103 @@ export async function POST(req: Request, ctx: Ctx) {
     const quotation = await Quotation.findById(id);
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
+    }
+
+    if (action === "revise") {
+      const fromVersion = quotation.version;
+      const fromStatus = quotation.status as QuotationStatus;
+
+      // QTN-05: snapshot the pre-revision state before applying any change.
+      quotation.versions.push({
+        version: quotation.version,
+        status: quotation.status,
+        lines: quotation.lines,
+        subtotal: quotation.subtotal,
+        vatPercent: quotation.vatPercent,
+        vatAmount: quotation.vatAmount,
+        total: quotation.total,
+        paymentTerms: quotation.paymentTerms,
+        deliveryTerms: quotation.deliveryTerms,
+        validityDays: quotation.validityDays,
+        termsText: quotation.termsText,
+        notes: quotation.notes,
+        savedAt: new Date(),
+        savedBy: access?.name || "System",
+      });
+
+      if (body.lines !== undefined) quotation.lines = normalizeQuotationLines(body.lines);
+      if (body.vatPercent !== undefined) quotation.vatPercent = Number(body.vatPercent) || 0;
+      if (body.paymentTerms !== undefined) quotation.paymentTerms = body.paymentTerms;
+      if (body.deliveryTerms !== undefined) quotation.deliveryTerms = body.deliveryTerms;
+      if (body.validityDays !== undefined) quotation.validityDays = Number(body.validityDays) || 14;
+      if (body.termsText !== undefined) quotation.termsText = body.termsText;
+      if (body.notes !== undefined) quotation.notes = body.notes;
+      if (body.expiry) quotation.expiry = new Date(body.expiry);
+      if (body.customerName !== undefined) quotation.customerName = body.customerName;
+      if (body.customerPhone !== undefined) quotation.customerPhone = body.customerPhone;
+      if (body.customerId !== undefined) quotation.customerId = body.customerId || undefined;
+      for (const key of EDITABLE_ANY_STATUS) {
+        if (body[key] !== undefined) {
+          (quotation as unknown as Record<string, unknown>)[key] = body[key];
+        }
+      }
+
+      const totals = computeQuotationTotals(quotation.lines, quotation.vatPercent);
+      quotation.subtotal = totals.subtotal;
+      quotation.vatAmount = totals.vatAmount;
+      quotation.total = totals.total;
+
+      quotation.version = fromVersion + 1;
+      quotation.status = "revised";
+      // A fresh revision voids the prior approval/signature — the customer must review it again.
+      quotation.approvalToken = undefined;
+      quotation.approvalTokenExpiresAt = undefined;
+      quotation.publicViewedAt = undefined;
+      quotation.customerDecision = undefined;
+      quotation.customerDecisionAt = undefined;
+      quotation.customerDecisionNote = "";
+      quotation.signatureDataUrl = "";
+      quotation.signedByName = "";
+      quotation.signedAt = undefined;
+      // Re-signed in-store as part of this same revision (rare, but supported).
+      if (body.signatureDataUrl) {
+        quotation.signatureDataUrl = body.signatureDataUrl;
+        quotation.signedByName = body.signedByName || quotation.customerName;
+        quotation.signedAt = new Date();
+      }
+
+      quotation.history.push({
+        at: new Date(),
+        by: access?.name || "System",
+        action: "revised",
+        fromStatus,
+        toStatus: "revised",
+        fromVersion,
+        toVersion: quotation.version,
+      });
+
+      await quotation.save();
+      return NextResponse.json(mapQuote(toJSON(quotation)!));
+    }
+
+    if (action === "share") {
+      if (!quotation.approvalToken) {
+        quotation.approvalToken = randomBytes(24).toString("base64url");
+      }
+      quotation.approvalTokenExpiresAt = quotation.expiry;
+      if (quotation.status === "draft") {
+        quotation.status = "sent";
+      }
+      quotation.history.push({
+        at: new Date(),
+        by: access?.name || "System",
+        action: "shared",
+      });
+      await quotation.save();
+      return NextResponse.json({
+        quotation: mapQuote(toJSON(quotation)!),
+        approvalToken: quotation.approvalToken,
+      });
     }
 
     if (action === "convert") {
@@ -80,30 +266,50 @@ export async function POST(req: Request, ctx: Ctx) {
           { status: 400 },
         );
       }
+      if (!quotation.lines.length) {
+        return NextResponse.json(
+          { error: "Quotation has no line items to convert" },
+          { status: 400 },
+        );
+      }
+
+      // QTN-06: carry every line item across as-is — no re-entry.
+      const lines = quotation.lines.map((line: (typeof quotation.lines)[number]) => ({
+        productId: line.productId,
+        name: line.name,
+        qty: line.qty,
+        unitLabel: line.unitLabel,
+        unitPrice: line.unitPrice,
+        lineType: line.lineType === "custom_blend" ? "remix" : line.lineType,
+        formulaId: line.formulaId,
+        packagingProductIds: line.packagingProductIds,
+      }));
+
       const sale = await Sale.create({
         customerPhone: quotation.customerPhone,
         customerName: quotation.customerName,
+        customerId: quotation.customerId,
+        salesperson: access?.name || "Quotation Conversion",
         payment: "credit",
         status: "completed",
         saleType: "Wholesale",
-        subtotal: quotation.total,
+        subtotal: quotation.subtotal,
         total: quotation.total,
-        lines: [
-          {
-            name: `Converted ${quotation.number}`,
-            qty: quotation.items,
-            unitLabel: "items",
-            unitPrice: quotation.total / Math.max(quotation.items, 1),
-            lineType: "wholesale",
-          },
-        ],
+        lines,
         branchId: access?.branchId ?? undefined,
         branchName: access?.branchName ?? undefined,
       });
       quotation.convertedToSaleId = sale._id;
+      quotation.status = "converted";
+      quotation.history.push({
+        at: new Date(),
+        by: access?.name || "System",
+        action: "converted",
+        detail: String(sale._id),
+      });
       await quotation.save();
       return NextResponse.json({
-        quotation: toJSON(quotation),
+        quotation: mapQuote(toJSON(quotation)!),
         sale: toJSON(sale),
       });
     }

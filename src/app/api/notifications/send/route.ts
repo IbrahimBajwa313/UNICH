@@ -41,6 +41,7 @@ type Body = {
     items: number;
     date?: string;
     expiry?: string;
+    approvalUrl?: string;
   };
 };
 
@@ -315,6 +316,7 @@ async function buildContent(input: {
       items: body.quotation.items,
       date: body.quotation.date,
       expiry: body.quotation.expiry,
+      approvalUrl: body.quotation.approvalUrl,
     };
     return {
       subject: `UNICH Quotation ${body.quotation.number}`.trim(),

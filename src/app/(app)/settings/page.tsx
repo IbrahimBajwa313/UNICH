@@ -363,6 +363,66 @@ export default function SettingsPage() {
           </Panel>
 
           <Panel>
+            <PanelHeader
+              title="Quotation Defaults"
+              subtitle="QTN-03 — payment/delivery term presets, validity, and the default T&Cs text new quotations start with."
+            />
+            <dl className="space-y-3 text-sm">
+              <EditableRow
+                label="Number prefix"
+                value={draft.quotationNumberPrefix ?? "QT"}
+                onChange={(value) => setDraft({ ...draft, quotationNumberPrefix: value })}
+              />
+              <EditableRow
+                label="Default validity (days)"
+                value={String(draft.quotationDefaultValidityDays ?? 14)}
+                onChange={(value) =>
+                  setDraft({ ...draft, quotationDefaultValidityDays: Number(value) || 14 })
+                }
+              />
+              <EditableRow
+                label="Payment terms presets (comma-separated)"
+                value={(draft.quotationPaymentTermsPresets ?? []).join(", ")}
+                onChange={(value) =>
+                  setDraft({
+                    ...draft,
+                    quotationPaymentTermsPresets: value
+                      .split(",")
+                      .map((v) => v.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+              <EditableRow
+                label="Delivery terms presets (comma-separated)"
+                value={(draft.quotationDeliveryTermsPresets ?? []).join(", ")}
+                onChange={(value) =>
+                  setDraft({
+                    ...draft,
+                    quotationDeliveryTermsPresets: value
+                      .split(",")
+                      .map((v) => v.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+              <div className="pb-1">
+                <dt className="mb-1.5 text-ink-muted">Default terms &amp; conditions</dt>
+                <dd>
+                  <textarea
+                    value={draft.quotationTermsTemplate ?? ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, quotationTermsTemplate: e.target.value })
+                    }
+                    rows={3}
+                    className="w-full rounded border border-line bg-mist px-2 py-1.5 text-sm outline-none focus:border-gold"
+                  />
+                </dd>
+              </div>
+            </dl>
+          </Panel>
+
+          <Panel>
             <PanelHeader title="Integrations" subtitle="Roadmap hooks" />
             <ul className="space-y-2">
               {integrations.map((i) => (

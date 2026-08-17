@@ -28,17 +28,24 @@ export function proxy(request: NextRequest) {
     isApi ? applyCorsHeaders(res, request) : res;
 
   const isLogin = pathname === "/login" || pathname.startsWith("/login/");
+  // QTN-10: customer approval link — reachable only with the unguessable token, no session.
+  const isPublicQuotationPage = pathname === "/q" || pathname.startsWith("/q/");
   const isPublicApi =
     pathname === "/api/health" ||
     pathname === "/api/auth/login" ||
     pathname === "/api/auth/logout" ||
     pathname === "/api/auth/me" ||
-    pathname.startsWith("/api/auth/formula-admin");
+    pathname.startsWith("/api/auth/formula-admin") ||
+    pathname.startsWith("/api/quotations/public/");
 
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
 
   if (isPublicApi) {
     return withCors(NextResponse.next());
+  }
+
+  if (isPublicQuotationPage) {
+    return NextResponse.next();
   }
 
   if (isLogin) {

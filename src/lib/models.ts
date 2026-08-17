@@ -229,20 +229,159 @@ const PurchaseOrderSchema = new Schema(
   { timestamps: true },
 );
 
+/** QTN-02/QTN-09: catalog product or custom-blend (formula/bottle/packaging/design) line. */
+const QuotationLineSchema = new Schema(
+  {
+    productId: { type: Schema.Types.ObjectId, ref: "Product" },
+    name: { type: String, required: true },
+    qty: { type: Number, required: true, min: 0 },
+    unitLabel: { type: String, required: true },
+    unitPrice: { type: Number, required: true, min: 0 },
+    lineType: {
+      type: String,
+      enum: [
+        "ready",
+        "remix",
+        "oil",
+        "refill",
+        "packaging",
+        "wholesale",
+        "custom_blend",
+      ],
+      required: true,
+    },
+    /** QTN-09 custom-blend refs — recipe itself stays secret (BLD-04), only the link is stored. */
+    formulaId: { type: Schema.Types.ObjectId, ref: "Formula" },
+    formulaName: { type: String, default: "" },
+    packagingProductIds: [{ type: Schema.Types.ObjectId, ref: "Product" }],
+    bottleNote: { type: String, default: "" },
+    designNote: { type: String, default: "" },
+    charges: { type: Number, default: 0, min: 0 },
+    notes: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
+/** QTN-07: customer LPO/PO supporting file, stored inline (no external storage configured). */
+const QuotationAttachmentSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    mimeType: { type: String, required: true },
+    dataBase64: { type: String, required: true },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
+/** QTN-05 immutable snapshot of a quotation before a revision is applied. */
+const QuotationVersionSchema = new Schema(
+  {
+    version: { type: Number, required: true },
+    status: { type: String, required: true },
+    lines: { type: [QuotationLineSchema], default: [] },
+    subtotal: { type: Number, required: true, default: 0 },
+    vatPercent: { type: Number, required: true, default: 0 },
+    vatAmount: { type: Number, required: true, default: 0 },
+    total: { type: Number, required: true, default: 0 },
+    paymentTerms: String,
+    deliveryTerms: String,
+    validityDays: Number,
+    termsText: String,
+    notes: String,
+    savedAt: { type: Date, required: true },
+    savedBy: String,
+  },
+  { _id: false },
+);
+
+/** QTN-05 append-only audit log (separate from the version snapshots above). */
+const QuotationHistorySchema = new Schema(
+  {
+    at: { type: Date, required: true },
+    by: String,
+    action: {
+      type: String,
+      enum: [
+        "created",
+        "updated",
+        "status_changed",
+        "revised",
+        "shared",
+        "converted",
+        "customer_decision",
+      ],
+      required: true,
+    },
+    detail: String,
+    fromStatus: String,
+    toStatus: String,
+    fromVersion: Number,
+    toVersion: Number,
+  },
+  { _id: false },
+);
+
 const QuotationSchema = new Schema(
   {
     number: { type: String, required: true, unique: true },
+    customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
     customerName: { type: String, required: true },
     customerPhone: { type: String, required: true },
+    customerEmail: { type: String, default: "" },
+    customerTrn: { type: String, default: "" },
+    customerAddress: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["draft", "sent", "revised", "approved", "rejected", "expired"],
+      enum: [
+        "draft",
+        "sent",
+        "revised",
+        "approved",
+        "rejected",
+        "expired",
+        "converted",
+      ],
       default: "draft",
     },
     date: { type: Date, required: true },
     expiry: { type: Date, required: true },
+
+    lines: { type: [QuotationLineSchema], default: [] },
+    /** Server-computed from lines + vatPercent — never trust client totals. */
+    subtotal: { type: Number, required: true, default: 0 },
+    vatPercent: { type: Number, required: true, default: 0 },
+    vatAmount: { type: Number, required: true, default: 0 },
     total: { type: Number, required: true, default: 0 },
-    items: { type: Number, required: true, default: 0 },
+
+    /** QTN-07 */
+    customerPoNumber: { type: String, default: "" },
+    attachments: { type: [QuotationAttachmentSchema], default: [] },
+
+    /** QTN-03 */
+    paymentTerms: { type: String, default: "" },
+    deliveryTerms: { type: String, default: "" },
+    validityDays: { type: Number, default: 14 },
+    termsText: { type: String, default: "" },
+    notes: { type: String, default: "" },
+
+    /** QTN-02 signature capture on approval */
+    signatureDataUrl: { type: String, default: "" },
+    signedByName: { type: String, default: "" },
+    signedAt: Date,
+
+    /** QTN-05 */
+    version: { type: Number, required: true, default: 1, min: 1 },
+    versions: { type: [QuotationVersionSchema], default: [] },
+    history: { type: [QuotationHistorySchema], default: [] },
+
+    /** QTN-10 public approval link */
+    approvalToken: { type: String, index: true, sparse: true, unique: true },
+    approvalTokenExpiresAt: Date,
+    publicViewedAt: Date,
+    customerDecision: { type: String, enum: ["approved", "rejected"] },
+    customerDecisionAt: Date,
+    customerDecisionNote: { type: String, default: "" },
+
     convertedToSaleId: { type: Schema.Types.ObjectId, ref: "Sale" },
     /** BRN-08 branch isolation */
     branchId: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
@@ -411,6 +550,30 @@ const AppSettingsSchema = new Schema(
       default: "thermal",
     },
     autoPrintReceipt: { type: Boolean, default: false },
+    /** QTN-03/QTN-05 quotation defaults */
+    quotationNumberPrefix: { type: String, default: "QT" },
+    quotationDefaultValidityDays: { type: Number, default: 14 },
+    quotationTermsTemplate: {
+      type: String,
+      default:
+        "Prices are valid for the quoted validity period. Goods once sold on custom-blend orders are not returnable. Delivery timelines are estimates and may vary.",
+    },
+    quotationPaymentTermsPresets: {
+      type: [String],
+      default: [
+        "50% advance, balance on delivery",
+        "Net 30",
+        "Cash on delivery",
+      ],
+    },
+    quotationDeliveryTermsPresets: {
+      type: [String],
+      default: [
+        "Ex-store pickup",
+        "Delivery within 3–5 business days",
+        "Delivery within UAE only",
+      ],
+    },
     currentUserName: { type: String, default: "Ahmad Ibrahim" },
     currentUserRole: { type: String, default: "admin" },
     currentUserRoleLabel: { type: String, default: "Admin" },
