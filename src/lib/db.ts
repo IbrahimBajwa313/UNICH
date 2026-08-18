@@ -3,16 +3,12 @@ import mongoose from "mongoose";
 
 const MONGODB_URI = process.env.DATABASE_URL;
 
-if (!MONGODB_URI) {
-  throw new Error("Missing DATABASE_URL in environment variables");
-}
-
 dns.setDefaultResultOrder("ipv4first");
 // Windows / local DNS resolvers often break mongodb+srv SRV lookups in Node.
 // Only override to public resolvers for +srv URIs — a plain mongodb:// URI
 // (explicit host list, no SRV lookup) gets no benefit from this, and forcing
 // 8.8.8.8/1.1.1.1 can itself stall/timeout on networks that block those IPs.
-if (MONGODB_URI.startsWith("mongodb+srv://")) {
+if (MONGODB_URI?.startsWith("mongodb+srv://")) {
   try {
     dns.setServers(["8.8.8.8", "1.1.1.1"]);
   } catch {
@@ -40,9 +36,13 @@ global.mongooseCache = cached;
 export async function connectDB() {
   if (cached.conn) return cached.conn;
 
+  if (!MONGODB_URI) {
+    throw new Error("Missing DATABASE_URL in environment variables");
+  }
+
   if (!cached.promise) {
     cached.promise = mongoose
-      .connect(MONGODB_URI!, {
+      .connect(MONGODB_URI, {
         bufferCommands: false,
         // Give Atlas TLS handshake room on slower networks (observed 4-15s here).
         serverSelectionTimeoutMS: 15000,
