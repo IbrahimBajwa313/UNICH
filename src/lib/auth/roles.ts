@@ -228,3 +228,22 @@ export function isUserRole(value: unknown): value is UserRole {
 export function canAccessAllBranches(role: UserRole): boolean {
   return role === "owner";
 }
+
+/**
+ * Cost/margin/supplier-price fields (wholesalePrice, costFifo, minMarginPct,
+ * unitCost) are financial data, not catalog data. Sales-facing roles only
+ * ever need the sell price to complete a transaction.
+ */
+export function canViewCostPrices(role: UserRole): boolean {
+  return role !== "cashier";
+}
+
+/** Strip cost/margin fields from a plain object in place-safe fashion. */
+export function redactCostFields<T extends Record<string, unknown>>(
+  obj: T,
+  fields: string[],
+): T {
+  const copy = { ...obj };
+  for (const f of fields) delete copy[f];
+  return copy;
+}

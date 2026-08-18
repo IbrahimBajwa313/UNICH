@@ -175,9 +175,12 @@ export default function SettingsPage() {
                 >
                   <p className="font-medium">{ROLE_LABELS[roleKey]}</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {(seeded?.access?.length
-                      ? seeded.access
-                      : perms.slice(0, 6).map((p) => p.split(":")[0])
+                    {Array.from(
+                      new Set(
+                        seeded?.access?.length
+                          ? seeded.access
+                          : perms.slice(0, 6).map((p) => p.split(":")[0]),
+                      ),
                     ).map((a) => (
                       <Badge key={a} tone="neutral">
                         {a}

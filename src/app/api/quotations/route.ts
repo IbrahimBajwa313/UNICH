@@ -6,6 +6,7 @@ import { normalizeQuotationLines } from "@/lib/quotation/lines";
 import { loadQuotationSettings } from "@/lib/quotation/server";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { branchScopeFilter } from "@/lib/auth/guards";
 import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapQuote(q: Record<string, unknown>) {
@@ -39,6 +40,10 @@ export async function GET(req: Request) {
           : { $regex: escapeRegex(phone), $options: "i" };
     }
     if (customerId) filter.customerId = customerId;
+    if (access) {
+      const scope = branchScopeFilter(access);
+      if (scope) Object.assign(filter, scope);
+    }
     const quotations = await Quotation.find(filter).sort({ date: -1 });
     return NextResponse.json(toJSONList(quotations).map(mapQuote));
   } catch (error) {

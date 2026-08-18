@@ -16,6 +16,7 @@ const VIEW_W = 600;
 const VIEW_H = 180;
 const PAD_TOP = 20;
 const PAD_BOTTOM = 10;
+const PAD_RIGHT = 54;
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -108,7 +109,8 @@ export function PurchaseSpendTrendChart({ purchases }: { purchases: PurchaseOrde
   const n = buckets.length;
   const baselineY = VIEW_H - PAD_BOTTOM;
 
-  const xAt = (i: number) => (n === 1 ? VIEW_W / 2 : (i / (n - 1)) * VIEW_W);
+  const xAt = (i: number) =>
+    n === 1 ? (VIEW_W - PAD_RIGHT) / 2 : (i / (n - 1)) * (VIEW_W - PAD_RIGHT);
   const yAt = (value: number) =>
     PAD_TOP + (1 - value / maxValue) * (VIEW_H - PAD_TOP - PAD_BOTTOM);
 
@@ -125,6 +127,26 @@ export function PurchaseSpendTrendChart({ purchases }: { purchases: PurchaseOrde
   const hasData = buckets.some((b) => b.received + b.pending > 0);
   const lastReceived = receivedPoints[receivedPoints.length - 1];
   const lastPending = pendingPoints[pendingPoints.length - 1];
+
+  // Keep the two end-of-line value badges from stacking on top of each other
+  // when received and pending land close together vertically.
+  let receivedTopPct = lastReceived ? (lastReceived.y / VIEW_H) * 100 : 0;
+  let pendingTopPct = lastPending ? (lastPending.y / VIEW_H) * 100 : 0;
+  if (lastReceived && lastPending) {
+    const MIN_GAP_PCT = 16;
+    const gap = pendingTopPct - receivedTopPct;
+    if (Math.abs(gap) < MIN_GAP_PCT) {
+      const mid = (receivedTopPct + pendingTopPct) / 2;
+      const half = MIN_GAP_PCT / 2;
+      if (gap >= 0) {
+        receivedTopPct = mid - half;
+        pendingTopPct = mid + half;
+      } else {
+        receivedTopPct = mid + half;
+        pendingTopPct = mid - half;
+      }
+    }
+  }
 
   return (
     <div>
@@ -221,7 +243,7 @@ export function PurchaseSpendTrendChart({ purchases }: { purchases: PurchaseOrde
               className="pointer-events-none absolute -translate-y-1/2 rounded-full border border-gold/50 bg-paper px-2 py-0.5 text-[10px] font-semibold text-gold-deep shadow-[var(--shadow-soft)]"
               style={{
                 left: `${(lastReceived.x / VIEW_W) * 100}%`,
-                top: `${(lastReceived.y / VIEW_H) * 100}%`,
+                top: `${receivedTopPct}%`,
                 marginLeft: "10px",
               }}
             >
@@ -233,7 +255,7 @@ export function PurchaseSpendTrendChart({ purchases }: { purchases: PurchaseOrde
               className="pointer-events-none absolute -translate-y-1/2 rounded-full border border-line-strong bg-paper px-2 py-0.5 text-[10px] font-medium text-ink-muted"
               style={{
                 left: `${(lastPending.x / VIEW_W) * 100}%`,
-                top: `${(lastPending.y / VIEW_H) * 100}%`,
+                top: `${pendingTopPct}%`,
                 marginLeft: "10px",
               }}
             >

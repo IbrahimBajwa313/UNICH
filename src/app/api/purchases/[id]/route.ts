@@ -9,6 +9,7 @@ import {
 import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { assertBranchAccess } from "@/lib/auth/guards";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -53,6 +54,10 @@ export async function PUT(req: Request, ctx: Ctx) {
     const purchase = await PurchaseOrder.findById(id);
     if (!purchase) {
       return NextResponse.json({ error: "Purchase not found" }, { status: 404 });
+    }
+    if (access) {
+      const denied = assertBranchAccess(access, purchase.branchId ? String(purchase.branchId) : null);
+      if (denied) return denied;
     }
 
     if (body.date) purchase.date = new Date(body.date);
@@ -157,6 +162,14 @@ export async function DELETE(req: Request, ctx: Ctx) {
 
     await connectDB();
     const { id } = await ctx.params;
+    const existing = await PurchaseOrder.findById(id);
+    if (!existing) {
+      return NextResponse.json({ error: "Purchase not found" }, { status: 404 });
+    }
+    if (access) {
+      const denied = assertBranchAccess(access, existing.branchId ? String(existing.branchId) : null);
+      if (denied) return denied;
+    }
     const purchase = await PurchaseOrder.findByIdAndDelete(id);
     if (!purchase) {
       return NextResponse.json({ error: "Purchase not found" }, { status: 404 });

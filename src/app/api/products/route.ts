@@ -4,6 +4,9 @@ import { defaultLowStockAt } from "@/lib/inventory/stockCheck";
 import { Product } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { canViewCostPrices, redactCostFields } from "@/lib/auth/roles";
+
+const COST_FIELDS = ["wholesalePrice", "costFifo", "minMarginPct"];
 
 export async function GET(req: Request) {
   try {
@@ -24,7 +27,11 @@ export async function GET(req: Request) {
       ];
     }
     const products = await Product.find(filter).sort({ name: 1 }).lean();
-    return NextResponse.json(toJSONList(products));
+    let list = toJSONList(products);
+    if (access && !canViewCostPrices(access.role)) {
+      list = list.map((p) => redactCostFields(p, COST_FIELDS));
+    }
+    return NextResponse.json(list);
   } catch (error) {
     return NextResponse.json(
       { error: safeErrorMessage(error, "Failed to load products") },

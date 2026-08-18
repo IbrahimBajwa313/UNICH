@@ -10,6 +10,7 @@ import { FAST_WC, resolveCustomerByPhone } from "@/lib/sales";
 import { SaleError } from "@/lib/sales/errors";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { assertBranchAccess } from "@/lib/auth/guards";
 import type { QuotationStatus } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -45,6 +46,10 @@ export async function GET(req: Request, ctx: Ctx) {
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
     }
+    if (access) {
+      const denied = assertBranchAccess(access, quotation.branchId ? String(quotation.branchId) : null);
+      if (denied) return denied;
+    }
     return NextResponse.json(mapQuote(toJSON(quotation)!));
   } catch (error) {
     return NextResponse.json(
@@ -66,6 +71,10 @@ export async function PUT(req: Request, ctx: Ctx) {
     const quotation = await Quotation.findById(id);
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
+    }
+    if (access) {
+      const denied = assertBranchAccess(access, quotation.branchId ? String(quotation.branchId) : null);
+      if (denied) return denied;
     }
 
     // Pricing (lines/terms/VAT) can only change on a draft — anything already
@@ -150,6 +159,10 @@ export async function DELETE(req: Request, ctx: Ctx) {
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
     }
+    if (access) {
+      const denied = assertBranchAccess(access, quotation.branchId ? String(quotation.branchId) : null);
+      if (denied) return denied;
+    }
     if (quotation.convertedToSaleId) {
       return NextResponse.json(
         { error: "Cannot delete a quotation that has already been converted to a sale" },
@@ -179,6 +192,10 @@ export async function POST(req: Request, ctx: Ctx) {
     const quotation = await Quotation.findById(id);
     if (!quotation) {
       return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
+    }
+    if (access) {
+      const denied = assertBranchAccess(access, quotation.branchId ? String(quotation.branchId) : null);
+      if (denied) return denied;
     }
 
     if (action === "revise") {

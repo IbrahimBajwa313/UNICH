@@ -11,6 +11,7 @@ import "./inventoryAgeing";
 import "./inventoryStatus";
 import "./productionBatches";
 import "./profitMarginDaily";
+import "./purchaseSpendTrend";
 import "./purchasesBySupplier";
 import "./salesByPaymentMethod";
 import "./salesByProduct";

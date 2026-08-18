@@ -9,6 +9,7 @@ import {
 import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { branchScopeFilter } from "@/lib/auth/guards";
 
 function mapLine(l: Record<string, unknown>) {
   return {
@@ -62,7 +63,12 @@ export async function GET(req: Request) {
     if (access !== null && isAuthResponse(access)) return access;
 
     await connectDB();
-    const purchases = await PurchaseOrder.find().sort({ date: -1 });
+    const filter: Record<string, unknown> = {};
+    if (access) {
+      const scope = branchScopeFilter(access);
+      if (scope) Object.assign(filter, scope);
+    }
+    const purchases = await PurchaseOrder.find(filter).sort({ date: -1 });
     return NextResponse.json(toJSONList(purchases).map(mapPO));
   } catch (error) {
     return NextResponse.json(

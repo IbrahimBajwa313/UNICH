@@ -4,6 +4,7 @@ import { FifoLayer } from "@/lib/models";
 import { addFifoLayer } from "@/lib/inventory";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { canViewCostPrices } from "@/lib/auth/roles";
 
 export async function GET(req: Request) {
   try {
@@ -15,6 +16,7 @@ export async function GET(req: Request) {
     const productId = searchParams.get("productId");
     const filter = productId ? { productId } : {};
     const layers = await FifoLayer.find(filter).sort({ purchaseDate: 1 });
+    const showCost = !access || canViewCostPrices(access.role);
     return NextResponse.json(
       toJSONList(layers).map((l) => ({
         ...l,
@@ -28,6 +30,7 @@ export async function GET(req: Request) {
           l.purchaseDate instanceof Date
             ? l.purchaseDate.toISOString().slice(0, 10)
             : String(l.purchaseDate).slice(0, 10),
+        ...(showCost ? {} : { unitCost: undefined }),
       })),
     );
   } catch (error) {
