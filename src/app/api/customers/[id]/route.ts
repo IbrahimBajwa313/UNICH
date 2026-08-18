@@ -60,8 +60,8 @@ export async function PUT(req: Request, ctx: Ctx) {
 
 export async function DELETE(req: Request, ctx: Ctx) {
   try {
-    // CRM-12: Sales Staff may view/create/edit customers but not delete — Admin only.
-    const access = requireRole(req, ["super_admin", "admin"]);
+    // CRM-12: Cashier may view/create/edit customers but not delete — Manager+ only.
+    const access = requireRole(req, ["owner", "manager"]);
     if (isAuthResponse(access)) return access;
 
     await connectDB();

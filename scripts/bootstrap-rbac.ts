@@ -21,7 +21,7 @@ type DemoUser = {
 function demoUsersFromEnv(): DemoUser[] {
   return [
     {
-      name: env("ADMIN_NAME", "Super Admin"),
+      name: env("ADMIN_NAME", "Owner"),
       email: env(
         "SUPER_ADMIN_EMAIL",
         env("ADMIN_EMAIL", "abc@gmail.com"),
@@ -30,19 +30,19 @@ function demoUsersFromEnv(): DemoUser[] {
         "SUPER_ADMIN_PASSWORD",
         env("ADMIN_PASSWORD", "UnichAdmin@123"),
       ),
-      role: "super_admin",
+      role: "owner",
     },
     {
-      name: "Admin",
+      name: "Manager",
       email: env("ADMIN_USER_EMAIL", "admin@unich.local").toLowerCase(),
       password: env("ADMIN_USER_PASSWORD", "admin123"),
-      role: "admin",
+      role: "manager",
     },
     {
-      name: "Sales Staff",
+      name: "Cashier",
       email: env("SALES_EMAIL", "sales@unich.local").toLowerCase(),
       password: env("SALES_PASSWORD", "sales123"),
-      role: "sales",
+      role: "cashier",
     },
     {
       name: "Accountant",
@@ -55,6 +55,12 @@ function demoUsersFromEnv(): DemoUser[] {
       email: env("INVENTORY_EMAIL", "inventory@unich.local").toLowerCase(),
       password: env("INVENTORY_PASSWORD", "inventory123"),
       role: "inventory",
+    },
+    {
+      name: "Branch Manager",
+      email: env("BRANCH_MANAGER_EMAIL", "branchmanager@unich.local").toLowerCase(),
+      password: env("BRANCH_MANAGER_PASSWORD", "branch123"),
+      role: "branch_manager",
     },
   ];
 }

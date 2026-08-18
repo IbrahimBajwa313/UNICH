@@ -11,7 +11,7 @@ import type { ReportCategory } from "./types";
  * finance data just because they can view reports at all.
  */
 const ROLE_REPORT_CATEGORIES: Record<UserRole, ReportCategory[]> = {
-  super_admin: [
+  owner: [
     "sales",
     "inventory",
     "profit",
@@ -20,8 +20,9 @@ const ROLE_REPORT_CATEGORIES: Record<UserRole, ReportCategory[]> = {
     "finance",
     "production",
     "hr",
+    "branch",
   ],
-  admin: [
+  manager: [
     "sales",
     "inventory",
     "profit",
@@ -33,7 +34,16 @@ const ROLE_REPORT_CATEGORIES: Record<UserRole, ReportCategory[]> = {
   ],
   accountant: ["sales", "purchase", "profit", "finance", "customer"],
   inventory: ["inventory", "production"],
-  sales: ["sales", "customer"],
+  cashier: ["sales", "customer"],
+  branch_manager: [
+    "sales",
+    "inventory",
+    "profit",
+    "purchase",
+    "customer",
+    "finance",
+    "production",
+  ],
 };
 
 export function reportCategoriesForRole(role: UserRole): ReportCategory[] {

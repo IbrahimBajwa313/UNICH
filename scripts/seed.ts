@@ -1256,8 +1256,8 @@ async function seed() {
     receiptFormat: "thermal",
     autoPrintReceipt: false,
     currentUserName: "Ahmad Ibrahim",
-    currentUserRole: "admin",
-    currentUserRoleLabel: "Admin",
+    currentUserRole: "manager",
+    currentUserRoleLabel: "Manager",
     salespeople: ["Ahmad Ibrahim"],
     activeSalesperson: "Ahmad Ibrahim",
     pettyCashFloat: 500,
@@ -1272,11 +1272,12 @@ async function seed() {
       { name: "Claude AI", status: "Explore" },
     ],
     roles: [
-      { role: "Super Admin", access: ["Full system", "Branches", "Integrations", "User management"] },
-      { role: "Admin", access: ["Formulas", "Formula approval", "Pricing overrides", "Transfers", "Profit reports"] },
-      { role: "Sales Staff", access: ["POS", "Quotations", "Customers", "No formula view"] },
+      { role: "Owner", access: ["Full system", "Branches", "Integrations", "User management"] },
+      { role: "Manager", access: ["Formulas", "Formula approval", "Pricing overrides", "Transfers", "Profit reports"] },
+      { role: "Cashier", access: ["POS", "Quotations", "Customers", "No formula view"] },
       { role: "Accountant", access: ["Expenses", "Reports", "Payables", "Cash closing"] },
       { role: "Inventory", access: ["Stock", "Purchases", "Transfers request", "Excel import"] },
+      { role: "Branch Manager", access: ["Own branch POS", "Inventory", "Purchases", "Customers", "Reports (own branch)"] },
     ],
   });
 
@@ -1292,7 +1293,7 @@ async function seed() {
 
   const rbacUsers = [
     {
-      name: env("ADMIN_NAME", "Super Admin"),
+      name: env("ADMIN_NAME", "Owner"),
       email: env(
         "SUPER_ADMIN_EMAIL",
         env("ADMIN_EMAIL", "abc@gmail.com"),
@@ -1301,19 +1302,19 @@ async function seed() {
         "SUPER_ADMIN_PASSWORD",
         env("ADMIN_PASSWORD", "UnichAdmin@123"),
       ),
-      role: "super_admin" as const,
+      role: "owner" as const,
     },
     {
-      name: "Admin",
+      name: "Manager",
       email: env("ADMIN_USER_EMAIL", "admin@unich.local").toLowerCase(),
       password: env("ADMIN_USER_PASSWORD", "admin123"),
-      role: "admin" as const,
+      role: "manager" as const,
     },
     {
-      name: "Sales Staff",
+      name: "Cashier",
       email: env("SALES_EMAIL", "sales@unich.local").toLowerCase(),
       password: env("SALES_PASSWORD", "sales123"),
-      role: "sales" as const,
+      role: "cashier" as const,
     },
     {
       name: "Accountant",
@@ -1326,6 +1327,12 @@ async function seed() {
       email: env("INVENTORY_EMAIL", "inventory@unich.local").toLowerCase(),
       password: env("INVENTORY_PASSWORD", "inventory123"),
       role: "inventory" as const,
+    },
+    {
+      name: "Branch Manager",
+      email: env("BRANCH_MANAGER_EMAIL", "branchmanager@unich.local").toLowerCase(),
+      password: env("BRANCH_MANAGER_PASSWORD", "branch123"),
+      role: "branch_manager" as const,
     },
   ];
 

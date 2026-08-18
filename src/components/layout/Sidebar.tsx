@@ -42,7 +42,7 @@ const nav = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout, loading } = useAuth();
-  const role = (user?.role || "sales") as UserRole;
+  const role = (user?.role || "cashier") as UserRole;
   const branch = user?.branchName || (loading ? "…" : "No branch");
   const name = user?.name || (loading ? "…" : "User");
   const roleLabel = user?.roleLabel || "";

@@ -1,9 +1,10 @@
 export type UserRole =
-  | "super_admin"
-  | "admin"
-  | "sales"
+  | "owner"
+  | "manager"
+  | "cashier"
   | "accountant"
-  | "inventory";
+  | "inventory"
+  | "branch_manager";
 
 /** BRN-08 branch (multi-store). */
 export type Branch = {

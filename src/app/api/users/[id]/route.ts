@@ -93,15 +93,15 @@ export async function PUT(req: Request, ctx: Ctx) {
       if (!isUserRole(body.role)) {
         return NextResponse.json({ error: "Invalid role." }, { status: 400 });
       }
-      if (body.role === "super_admin" && auth.role !== "super_admin") {
+      if (body.role === "owner" && auth.role !== "owner") {
         return NextResponse.json(
-          { error: "Only Super Admin can assign Super Admin." },
+          { error: "Only Owner can assign Owner." },
           { status: 403 },
         );
       }
-      if (user.role === "super_admin" && auth.role !== "super_admin") {
+      if (user.role === "owner" && auth.role !== "owner") {
         return NextResponse.json(
-          { error: "Only Super Admin can modify Super Admin users." },
+          { error: "Only Owner can modify Owner users." },
           { status: 403 },
         );
       }
@@ -111,7 +111,7 @@ export async function PUT(req: Request, ctx: Ctx) {
 
     if (body.branchId !== undefined) {
       if (body.branchId === null || body.branchId === "") {
-        if (user.role !== "super_admin") {
+        if (user.role !== "owner") {
           return NextResponse.json(
             { error: "branchId is required for this role." },
             { status: 400 },
@@ -128,7 +128,7 @@ export async function PUT(req: Request, ctx: Ctx) {
           );
         }
         if (
-          auth.role !== "super_admin" &&
+          auth.role !== "owner" &&
           auth.branchId &&
           String(branch._id) !== auth.branchId
         ) {
@@ -183,9 +183,9 @@ export async function DELETE(req: Request, ctx: Ctx) {
     if (!user) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
-    if (user.role === "super_admin" && auth.role !== "super_admin") {
+    if (user.role === "owner" && auth.role !== "owner") {
       return NextResponse.json(
-        { error: "Only Super Admin can remove Super Admin users." },
+        { error: "Only Owner can remove Owner users." },
         { status: 403 },
       );
     }

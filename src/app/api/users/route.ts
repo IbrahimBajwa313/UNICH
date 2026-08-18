@@ -73,10 +73,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Only super_admin can create another super_admin
-    if (role === "super_admin" && auth.role !== "super_admin") {
+    // Only Owner can create another Owner
+    if (role === "owner" && auth.role !== "owner") {
       return NextResponse.json(
-        { error: "Only Super Admin can create Super Admin users." },
+        { error: "Only Owner can create Owner users." },
         { status: 403 },
       );
     }
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
     let branchId: string | null = body.branchId ? String(body.branchId) : null;
     let branchName: string | null = null;
 
-    if (role !== "super_admin") {
+    if (role !== "owner") {
       if (!branchId) {
         return NextResponse.json(
           { error: "branchId is required for this role." },
@@ -109,9 +109,9 @@ export async function POST(req: Request) {
           { status: 400 },
         );
       }
-      // Non–super-admin admins can only assign their own branch
+      // Non-Owner managers can only assign their own branch
       if (
-        auth.role !== "super_admin" &&
+        auth.role !== "owner" &&
         auth.branchId &&
         String(branch._id) !== auth.branchId
       ) {

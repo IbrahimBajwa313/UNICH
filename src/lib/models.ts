@@ -575,8 +575,8 @@ const AppSettingsSchema = new Schema(
       ],
     },
     currentUserName: { type: String, default: "Ahmad Ibrahim" },
-    currentUserRole: { type: String, default: "admin" },
-    currentUserRoleLabel: { type: String, default: "Admin" },
+    currentUserRole: { type: String, default: "manager" },
+    currentUserRoleLabel: { type: String, default: "Manager" },
     salespeople: {
       type: [{ type: String, trim: true }],
       default: ["Ahmad Ibrahim"],
@@ -832,7 +832,7 @@ const UserSchema = new Schema(
     passwordHash: { type: String, required: true },
     role: {
       type: String,
-      enum: ["super_admin", "admin", "sales", "accountant", "inventory"],
+      enum: ["owner", "manager", "cashier", "accountant", "inventory", "branch_manager"],
       required: true,
       index: true,
     },

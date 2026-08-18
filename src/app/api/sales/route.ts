@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     if (
       access &&
       "role" in access &&
-      access.role !== "super_admin" &&
+      access.role !== "owner" &&
       access.branchId
     ) {
       conditions.push({

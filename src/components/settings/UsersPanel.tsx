@@ -26,7 +26,7 @@ const emptyDraft = (): Draft => ({
   name: "",
   email: "",
   password: "",
-  role: "sales",
+  role: "cashier",
   branchId: "",
   active: true,
 });
@@ -223,7 +223,7 @@ export function UsersPanel() {
                 }
                 className="h-10 w-full rounded-full border border-line bg-mist px-4 text-sm outline-none focus:border-gold"
               >
-                <option value="">— None (Super Admin) —</option>
+                <option value="">— None (Owner) —</option>
                 {branchList.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} ({b.code})

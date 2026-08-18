@@ -15,6 +15,7 @@ import {
   type ReportPeriod,
 } from "@/lib/reports/period";
 import type { SaleReportResult, SaleReportStatus } from "@/lib/reports/salesReport";
+import { ReportCenter } from "./ReportCenter";
 
 const selectClass =
   "h-10 rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20";
@@ -115,6 +116,8 @@ export default function ReportsPage() {
           exporting={exporting === "held"}
           onExport={() => void exportReport("held", heldPeriod, heldDate)}
         />
+
+        <ReportCenter />
       </div>
     </div>
   );

@@ -16,7 +16,7 @@ export async function GET(req: Request) {
 
     await connectDB();
     const filter =
-      auth.role === "super_admin"
+      auth.role === "owner"
         ? {}
         : auth.branchId
           ? { _id: auth.branchId }
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
   }
 }
 
-/** POST /api/branches — create branch (super_admin). */
+/** POST /api/branches — create branch (owner). */
 export async function POST(req: Request) {
   try {
     const auth = requirePermission(req, "branches:write");

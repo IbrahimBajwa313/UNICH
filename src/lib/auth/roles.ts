@@ -54,7 +54,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   "branches:write",
 ];
 
-const SALES_PERMS: Permission[] = [
+const CASHIER_PERMS: Permission[] = [
   "dashboard:read",
   "pos:read",
   "pos:write",
@@ -71,7 +71,7 @@ const ACCOUNTANT_PERMS: Permission[] = [
   "expenses:write",
 ];
 
-/** PUR-04: purchase creation/receipt is owner/admin only — Inventory may view but not commit spend. */
+/** PUR-04: purchase creation/receipt is owner/manager only — Inventory may view but not commit spend. */
 const INVENTORY_PERMS: Permission[] = [
   "dashboard:read",
   "inventory:read",
@@ -79,33 +79,55 @@ const INVENTORY_PERMS: Permission[] = [
   "purchases:read",
 ];
 
-/** Admin: ops + formulas + users (branch-scoped). Not full branch CRUD. */
-const ADMIN_PERMS: Permission[] = ALL_PERMISSIONS.filter(
+/** Manager: ops + formulas + users (branch-scoped). Not full branch CRUD. */
+const MANAGER_PERMS: Permission[] = ALL_PERMISSIONS.filter(
   (p) => p !== "branches:write",
 );
 
+/** Branch Manager: day-to-day branch operations, no formulas/users/settings/branches — branch isolation (canAccessAllBranches) does the rest. */
+const BRANCH_MANAGER_PERMS: Permission[] = [
+  "dashboard:read",
+  "pos:read",
+  "pos:write",
+  "inventory:read",
+  "inventory:write",
+  "production:read",
+  "purchases:read",
+  "purchases:write",
+  "customers:read",
+  "customers:write",
+  "quotations:read",
+  "quotations:write",
+  "reports:read",
+  "expenses:read",
+  "expenses:write",
+];
+
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
-  super_admin: [...ALL_PERMISSIONS],
-  admin: ADMIN_PERMS,
-  sales: SALES_PERMS,
+  owner: [...ALL_PERMISSIONS],
+  manager: MANAGER_PERMS,
+  cashier: CASHIER_PERMS,
   accountant: ACCOUNTANT_PERMS,
   inventory: INVENTORY_PERMS,
+  branch_manager: BRANCH_MANAGER_PERMS,
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  sales: "Sales Staff",
+  owner: "Owner",
+  manager: "Manager",
+  cashier: "Cashier",
   accountant: "Accountant",
   inventory: "Inventory",
+  branch_manager: "Branch Manager",
 };
 
 export const ASSIGNABLE_ROLES: UserRole[] = [
-  "super_admin",
-  "admin",
-  "sales",
+  "owner",
+  "manager",
+  "cashier",
   "accountant",
   "inventory",
+  "branch_manager",
 ];
 
 /** App page → minimum permission to view. */
@@ -203,5 +225,5 @@ export function isUserRole(value: unknown): value is UserRole {
 
 /** Roles that may see all branches (no isolation filter). */
 export function canAccessAllBranches(role: UserRole): boolean {
-  return role === "super_admin";
+  return role === "owner";
 }

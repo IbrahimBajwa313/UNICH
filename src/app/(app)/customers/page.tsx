@@ -51,8 +51,8 @@ export default function CustomersPage() {
 
 function CustomersPageInner() {
   const { user } = useAuth();
-  /** CRM-12: Sales Staff view/create/edit; delete is Admin-only. */
-  const canDelete = user?.role === "admin" || user?.role === "super_admin";
+  /** CRM-12: Cashier view/create/edit; delete is Manager+ only. */
+  const canDelete = user?.role === "manager" || user?.role === "owner";
 
   const searchParams = useSearchParams();
   const { data: customers, loading, error, reload } = useApiData<Customer[]>("/api/customers");

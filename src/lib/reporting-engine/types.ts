@@ -13,7 +13,8 @@ export type ReportCategory =
   | "customer"
   | "finance"
   | "production"
-  | "hr";
+  | "hr"
+  | "branch";
 
 export type ReportColumnType = "string" | "number" | "currency" | "percent" | "date";
 
