@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, AlertTriangle, Sparkles } from "lucide-react";
+import { ArrowRight, AlertTriangle, Sparkles, TrendingUp, TrendingDown } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -154,30 +154,26 @@ export default function DashboardPage() {
       </div>
 
       {(canReports || canExpenses) && (
-        <Panel className="mt-6 animate-fade-up">
-          <PanelHeader
-            title="Profit Margin"
-            subtitle="This month · live, recalculated from current sales, cost and expense data"
-          />
-          <div className="flex flex-wrap items-center justify-around gap-8 py-2">
-            {canReports && (
-              <ProgressRing
-                value={stats.grossMarginPct ?? 0}
-                label="Gross Margin"
-                hint="revenue − FIFO cost"
-                tone="gold"
-              />
-            )}
-            {canExpenses && (
-              <ProgressRing
-                value={stats.netProfitMarginPct ?? 0}
-                label="Net Profit Margin"
-                hint="after expenses"
-                tone="sage"
-              />
-            )}
-          </div>
-        </Panel>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          {canReports && (
+            <MarginCard
+              label="Gross Margin"
+              caption="revenue − FIFO cost, this month"
+              value={stats.grossMarginPct ?? 0}
+              trendPts={stats.grossMarginTrendPts ?? 0}
+              tone="gold"
+            />
+          )}
+          {canExpenses && (
+            <MarginCard
+              label="Net Profit Margin"
+              caption="after all expenses, this month"
+              value={stats.netProfitMarginPct ?? 0}
+              trendPts={stats.netMarginTrendPts ?? 0}
+              tone="sage"
+            />
+          )}
+        </div>
       )}
 
       <div className={`mt-6 grid gap-6 ${canPos ? "xl:grid-cols-3" : ""}`}>
@@ -432,5 +428,43 @@ export default function DashboardPage() {
       </div>
 
     </div>
+  );
+}
+
+function MarginCard({
+  label,
+  caption,
+  value,
+  trendPts,
+  tone,
+}: {
+  label: string;
+  caption: string;
+  value: number;
+  trendPts: number;
+  tone: "gold" | "sage";
+}) {
+  const trendTone = trendPts > 0 ? "success" : trendPts < 0 ? "danger" : "neutral";
+  return (
+    <Panel className="animate-fade-up bg-gradient-to-b from-paper to-mist/60">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wider text-ink-muted">{label}</p>
+        {trendPts !== 0 && (
+          <Badge tone={trendTone}>
+            {trendPts > 0 ? (
+              <TrendingUp className="h-3 w-3" />
+            ) : (
+              <TrendingDown className="h-3 w-3" />
+            )}
+            {trendPts > 0 ? "+" : ""}
+            {trendPts.toFixed(1)} pts
+          </Badge>
+        )}
+      </div>
+      <div className="mt-4 flex justify-center">
+        <ProgressRing value={value} tone={tone} />
+      </div>
+      <p className="mt-4 text-center text-xs text-ink-muted">{caption}</p>
+    </Panel>
   );
 }

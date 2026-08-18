@@ -11,6 +11,16 @@ export function formatMoney(amount: number, currency = "AED"): string {
   }).format(amount);
 }
 
+/** Short form for tight chart labels, e.g. "AED 6.2K" instead of "AED 6,200.00". */
+export function formatMoneyCompact(amount: number, currency = "AED"): string {
+  return new Intl.NumberFormat("en-AE", {
+    style: "currency",
+    currency,
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(amount);
+}
+
 export function formatQty(qty: number, unit: string): string {
   const value = Number.isInteger(qty) ? qty.toString() : qty.toFixed(3);
   return `${value} ${unit}`;

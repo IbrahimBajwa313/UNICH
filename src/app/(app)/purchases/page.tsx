@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Stat } from "@/components/ui/Stat";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { PurchaseSpendTrendChart } from "@/components/purchases/PurchaseSpendTrendChart";
+import { SupplierSpendChart } from "@/components/purchases/SupplierSpendChart";
 import { api } from "@/lib/api";
 import { formatMoney, formatDate } from "@/lib/format";
 import type { Product, PurchaseOrder, Supplier } from "@/lib/types";
@@ -69,6 +71,19 @@ export default function PurchasesPage() {
   const supplierList = suppliers ?? [];
   const productList = products ?? [];
   const outstanding = supplierList.reduce((s, x) => s + x.outstanding, 0);
+
+  const supplierSpend = useMemo(() => {
+    const totals = new Map<string, { name: string; value: number }>();
+    for (const po of purchaseList) {
+      const bucket = totals.get(po.supplierId) || { name: po.supplierName, value: 0 };
+      bucket.value += po.total;
+      totals.set(po.supplierId, bucket);
+    }
+    return Array.from(totals.entries())
+      .map(([id, b]) => ({ id, name: b.name, value: Math.round(b.value * 100) / 100 }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [purchaseList]);
 
   const draftTotal = useMemo(() => {
     if (!purchaseDraft) return 0;
@@ -243,6 +258,21 @@ export default function PurchasesPage() {
           {formError}
         </p>
       ) : null}
+
+      <div className="mt-6 grid gap-5 xl:grid-cols-2">
+        <Panel>
+          <PanelHeader
+            title="Purchase Spend Trend"
+            subtitle="How much is received vs. still owed"
+          />
+          <PurchaseSpendTrendChart purchases={purchaseList} />
+        </Panel>
+
+        <Panel>
+          <PanelHeader title="Top Suppliers by Spend" subtitle="All-time purchase value" />
+          <SupplierSpendChart data={supplierSpend} />
+        </Panel>
+      </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-2">
         <Panel padding={false}>
