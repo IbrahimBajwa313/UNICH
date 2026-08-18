@@ -51,7 +51,12 @@ export async function ensureAuthBootstrap(): Promise<void> {
       process.env.ADMIN_PASSWORD ||
       process.env.FORMULA_ADMIN_PASSWORD ||
       process.env.IMPORT_ADMIN_PASSWORD ||
-      "admin";
+      (process.env.NODE_ENV === "production" ? undefined : "admin");
+    if (!password) {
+      throw new Error(
+        "ADMIN_PASSWORD is not set. Refusing to bootstrap the first admin user with an insecure default in production.",
+      );
+    }
 
     const name =
       process.env.ADMIN_NAME?.trim() ||

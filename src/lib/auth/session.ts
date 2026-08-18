@@ -25,12 +25,15 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function sessionSecret(): string {
-  return (
-    process.env.SESSION_SECRET ||
-    process.env.FORMULA_ADMIN_SECRET ||
-    process.env.ADMIN_PASSWORD ||
-    "unich-session-dev-secret"
-  );
+  const secret = process.env.SESSION_SECRET || process.env.FORMULA_ADMIN_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET is not set. Refusing to start with an insecure default in production.",
+    );
+  }
+  // Dev-only fallback — never reached in production (see check above).
+  return "unich-session-dev-secret";
 }
 
 function signPayload(payloadB64: string): string {

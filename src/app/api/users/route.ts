@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth/roles";
 import { connectDB } from "@/lib/db";
 import { Branch, User } from "@/lib/models";
+import { recordAudit } from "@/lib/audit/log";
 import type { UserRole } from "@/lib/types";
 
 /** GET /api/users — list users (admin). */
@@ -135,6 +136,14 @@ export async function POST(req: Request) {
       active: body.active !== false,
     });
 
+    recordAudit({
+      session: auth,
+      action: "user_created",
+      entityType: "User",
+      entityId: String(user._id),
+      detail: `${user.email} · ${user.role}`,
+      req,
+    });
     return NextResponse.json(mapUserPublic(user), { status: 201 });
   } catch (error) {
     return NextResponse.json(

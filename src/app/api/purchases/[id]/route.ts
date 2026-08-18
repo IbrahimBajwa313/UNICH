@@ -10,6 +10,7 @@ import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { assertBranchAccess } from "@/lib/auth/guards";
+import { recordAudit } from "@/lib/audit/log";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -69,10 +70,10 @@ export async function PUT(req: Request, ctx: Ctx) {
     // Full line replace (preserves qtyFifoApplied when productId+unitCost match by index productId)
     if (Array.isArray(body.lines)) {
       const prevByProduct = new Map(
-        purchase.lines.map((l) => [String(l.productId), Number(l.qtyFifoApplied) || 0]),
+        purchase.lines.map((l: LineBody) => [String(l.productId), Number(l.qtyFifoApplied) || 0]),
       );
-      purchase.lines = body.lines
-        .map((l: LineBody) => {
+      purchase.lines = (body.lines as LineBody[])
+        .map((l) => {
           const qtyOrdered = Number(l.qtyOrdered ?? l.qty ?? 0);
           const productId = String(l.productId);
           return {
@@ -91,7 +92,7 @@ export async function PUT(req: Request, ctx: Ctx) {
         .filter((l) => l.productId && l.qtyOrdered > 0);
       purchase.itemCount = purchase.lines.length;
       purchase.total = purchase.lines.reduce(
-        (s, l) => s + l.qtyOrdered * l.unitCost,
+        (s: number, l: LineBody) => s + Number(l.qtyOrdered) * Number(l.unitCost),
         0,
       );
     } else {
@@ -110,7 +111,9 @@ export async function PUT(req: Request, ctx: Ctx) {
     // Per-line receive deltas: { receive: [{ productId, qty }] } adds to qtyReceived
     if (Array.isArray(body.receive) && purchase.lines.length) {
       for (const r of body.receive as Array<{ productId: string; qty: number }>) {
-        const line = purchase.lines.find((l) => String(l.productId) === String(r.productId));
+        const line = purchase.lines.find(
+          (l: LineBody) => String(l.productId) === String(r.productId),
+        );
         if (!line) continue;
         line.qtyReceived = Math.min(
           line.qtyOrdered,
@@ -146,6 +149,14 @@ export async function PUT(req: Request, ctx: Ctx) {
       void recalcSupplierAvgLeadDays(String(purchase.supplierId));
     }
 
+    recordAudit({
+      session: access,
+      action: "purchase_updated",
+      entityType: "PurchaseOrder",
+      entityId: id,
+      detail: `status=${purchase.status}`,
+      req,
+    });
     return NextResponse.json(mapPO(toJSON(purchase)!));
   } catch (error) {
     return NextResponse.json(

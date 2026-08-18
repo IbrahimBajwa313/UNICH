@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Expense } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { recordAudit } from "@/lib/audit/log";
 
 function mapExpense(e: Record<string, unknown>) {
   return {
@@ -53,6 +54,14 @@ export async function POST(req: Request) {
       status: body.status || "pending",
       branchId: access?.branchId ?? undefined,
       branchName: access?.branchName ?? undefined,
+    });
+    recordAudit({
+      session: access,
+      action: "expense_created",
+      entityType: "Expense",
+      entityId: String(expense._id),
+      detail: `${expense.category || ""} · ${expense.amount}`,
+      req,
     });
     return NextResponse.json(mapExpense(toJSON(expense)!), { status: 201 });
   } catch (error) {

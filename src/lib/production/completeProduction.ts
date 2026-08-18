@@ -39,6 +39,14 @@ function newBatchNumber() {
   return `PB-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
+type PlannedLine = {
+  productId: string;
+  productName: string;
+  qty: number;
+  unit?: string;
+  reason?: string;
+};
+
 function applyYieldFields(
   order: {
     actualYieldMl?: number;
@@ -201,7 +209,7 @@ export async function completeProductionOrder(
     order.outputQty = yieldInfo.actualYieldMl;
   }
 
-  const needs = order.plannedLines.map((l) => ({
+  const needs = (order.plannedLines as PlannedLine[]).map((l) => ({
     productId: String(l.productId),
     productName: l.productName,
     qty: Number(l.qty),
@@ -215,7 +223,7 @@ export async function completeProductionOrder(
     throw err;
   }
 
-  const consumption = order.plannedLines.map((l) => {
+  const consumption = (order.plannedLines as PlannedLine[]).map((l) => {
     const result = deductMap.get(String(l.productId)) ?? {
       costTotal: 0,
       batches: [],

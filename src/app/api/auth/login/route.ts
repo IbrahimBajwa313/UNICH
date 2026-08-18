@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/rateLimit";
 import { RATE_LIMIT, WARN_REMAINING } from "@/lib/auth/rateLimitConfig";
 import { permissionsForRole, ROLE_LABELS } from "@/lib/auth/roles";
+import { recordAudit } from "@/lib/audit/log";
 import {
   applySessionCookie,
   createSessionToken,
@@ -81,6 +82,7 @@ async function loginHandler(req: Request) {
 
   if (!credentialsOk) {
     void recordFailedLogin(email);
+    recordAudit({ action: "login_failed", entityType: "User", email, req });
 
     const remaining = Math.max(0, rl.remaining - 1);
     return NextResponse.json(
@@ -126,6 +128,23 @@ async function loginHandler(req: Request) {
     roleLabel: mapped.roleLabel,
     branchId: mapped.branchId,
     branchName: mapped.branchName,
+  });
+
+  recordAudit({
+    session: {
+      userId: mapped.id,
+      name: mapped.name,
+      email: mapped.email,
+      role: mapped.role,
+      roleLabel: mapped.roleLabel,
+      branchId: mapped.branchId,
+      branchName: mapped.branchName,
+      exp: 0,
+    },
+    action: "login_success",
+    entityType: "User",
+    entityId: mapped.id,
+    req,
   });
 
   const res = NextResponse.json({

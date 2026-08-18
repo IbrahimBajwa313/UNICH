@@ -15,6 +15,7 @@ import type { FormulaComponent } from "@/lib/types";
 import { toJSON } from "@/lib/serialize";
 import { invalidateDefaultRemixCache } from "@/lib/sales/validateSale";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { recordAudit } from "@/lib/audit/log";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -128,6 +129,14 @@ export async function PUT(req: Request, ctx: Ctx) {
         return NextResponse.json({ error: "Formula not found" }, { status: 404 });
       }
       invalidateDefaultRemixCache();
+      recordAudit({
+        session: access,
+        action: "formula_updated",
+        entityType: "Formula",
+        entityId: id,
+        detail: `Restored from v${restoreVersion}`,
+        req,
+      });
       return NextResponse.json(mapFormula(toJSON(formula)!));
     }
 
@@ -198,6 +207,14 @@ export async function PUT(req: Request, ctx: Ctx) {
         return NextResponse.json({ error: "Formula not found" }, { status: 404 });
       }
       invalidateDefaultRemixCache();
+      recordAudit({
+        session: access,
+        action: "formula_updated",
+        entityType: "Formula",
+        entityId: id,
+        detail: `Status → ${nextStatus}`,
+        req,
+      });
       return NextResponse.json(mapFormula(toJSON(formula)!));
     }
 
@@ -335,6 +352,14 @@ export async function PUT(req: Request, ctx: Ctx) {
       return NextResponse.json({ error: "Formula not found" }, { status: 404 });
     }
     invalidateDefaultRemixCache();
+    recordAudit({
+      session: access,
+      action: "formula_updated",
+      entityType: "Formula",
+      entityId: id,
+      detail: `Recipe edited (${nextName})`,
+      req,
+    });
     return NextResponse.json(mapFormula(toJSON(formula)!));
   } catch (error) {
     return NextResponse.json(
@@ -359,6 +384,14 @@ export async function DELETE(req: Request, ctx: Ctx) {
       return NextResponse.json({ error: "Formula not found" }, { status: 404 });
     }
     invalidateDefaultRemixCache();
+    recordAudit({
+      session: access,
+      action: "formula_deleted",
+      entityType: "Formula",
+      entityId: id,
+      detail: String((formula as { name?: string }).name || ""),
+      req,
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

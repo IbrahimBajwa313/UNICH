@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { api } from "@/lib/api";
-import { ASSIGNABLE_ROLES, ROLE_LABELS } from "@/lib/auth/roles";
+import { CONFIRMED_ASSIGNABLE_ROLES, ROLE_LABELS } from "@/lib/auth/roles";
 import type { AppUser, Branch, UserRole } from "@/lib/types";
 
 type Draft = {
@@ -207,7 +207,14 @@ export function UsersPanel() {
                 }
                 className="h-10 w-full rounded-full border border-line bg-mist px-4 text-sm outline-none focus:border-gold"
               >
-                {ASSIGNABLE_ROLES.map((r) => (
+                {/* Only client-confirmed roles are offered here; other roles
+                    (manager/inventory/branch_manager) stay proposed until
+                    confirmed, though existing users keep whatever role they
+                    already have. */}
+                {(CONFIRMED_ASSIGNABLE_ROLES.includes(draft.role)
+                  ? CONFIRMED_ASSIGNABLE_ROLES
+                  : [...CONFIRMED_ASSIGNABLE_ROLES, draft.role]
+                ).map((r) => (
                   <option key={r} value={r}>
                     {ROLE_LABELS[r]}
                   </option>

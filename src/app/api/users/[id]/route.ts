@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth/roles";
 import { connectDB } from "@/lib/db";
 import { Branch, User } from "@/lib/models";
+import { recordAudit } from "@/lib/audit/log";
 import type { UserRole } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -153,6 +154,14 @@ export async function PUT(req: Request, ctx: Ctx) {
     }
 
     await user.save();
+    recordAudit({
+      session: auth,
+      action: "user_updated",
+      entityType: "User",
+      entityId: String(user._id),
+      detail: `role=${user.role} branch=${user.branchName || ""} active=${user.active}`,
+      req,
+    });
     return NextResponse.json(mapUserPublic(user));
   } catch (error) {
     return NextResponse.json(
@@ -193,6 +202,14 @@ export async function DELETE(req: Request, ctx: Ctx) {
     // Soft deactivate by default
     user.active = false;
     await user.save();
+    recordAudit({
+      session: auth,
+      action: "user_deactivated",
+      entityType: "User",
+      entityId: String(user._id),
+      detail: user.email,
+      req,
+    });
     return NextResponse.json({ ok: true, user: mapUserPublic(user) });
   } catch (error) {
     return NextResponse.json(

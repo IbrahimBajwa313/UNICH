@@ -862,3 +862,26 @@ const RateLimitSchema = new Schema({
 RateLimitSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const RateLimit = models.RateLimit || model("RateLimit", RateLimitSchema);
+
+/** General security/activity audit trail — who did what, when, from where. */
+const AuditLogSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    userName: String,
+    userEmail: String,
+    role: String,
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch" },
+    branchName: String,
+    action: { type: String, required: true },
+    entityType: { type: String, required: true },
+    entityId: String,
+    detail: String,
+    ip: String,
+  },
+  { timestamps: true },
+);
+AuditLogSchema.index({ createdAt: -1 });
+AuditLogSchema.index({ entityType: 1, entityId: 1 });
+AuditLogSchema.index({ userId: 1, createdAt: -1 });
+
+export const AuditLog = models.AuditLog || model("AuditLog", AuditLogSchema);

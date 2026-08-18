@@ -131,6 +131,19 @@ export const ASSIGNABLE_ROLES: UserRole[] = [
   "branch_manager",
 ];
 
+/**
+ * Roles the client has explicitly confirmed for this rollout: Admin (owner),
+ * Sales Staff (cashier), Accounting (accountant). `manager` / `inventory` /
+ * `branch_manager` stay fully implemented and valid server-side (existing
+ * users keep working) but are proposed-only — hidden from the "assign a
+ * role" UI until the client signs off on them.
+ */
+export const CONFIRMED_ASSIGNABLE_ROLES: UserRole[] = [
+  "owner",
+  "cashier",
+  "accountant",
+];
+
 /** App page → minimum permission to view. */
 export const ROUTE_PERMISSIONS: { prefix: string; permission: Permission }[] = [
   { prefix: "/settings", permission: "settings:read" },

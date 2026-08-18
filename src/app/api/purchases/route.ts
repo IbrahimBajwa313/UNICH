@@ -10,6 +10,7 @@ import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { branchScopeFilter } from "@/lib/auth/guards";
+import { recordAudit } from "@/lib/audit/log";
 
 function mapLine(l: Record<string, unknown>) {
   return {
@@ -128,6 +129,15 @@ export async function POST(req: Request) {
     if (status === "received") {
       void recalcSupplierAvgLeadDays(String(purchase.supplierId));
     }
+
+    recordAudit({
+      session: access,
+      action: "purchase_created",
+      entityType: "PurchaseOrder",
+      entityId: String(purchase._id),
+      detail: `${purchase.supplierName || ""} · ${purchase.total}`,
+      req,
+    });
 
     return NextResponse.json(mapPO(toJSON(purchase)!), { status: 201 });
   } catch (error) {

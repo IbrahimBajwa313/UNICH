@@ -17,6 +17,7 @@ import { createSale } from "@/lib/sales/createSale";
 import { SaleError } from "@/lib/sales/errors";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { recordAudit } from "@/lib/audit/log";
 
 const ADJUSTMENT_SUPPLIER = "Stock Adjustment";
 
@@ -198,6 +199,14 @@ export async function POST(req: Request) {
       });
 
       const updated = await Product.findById(productId);
+      recordAudit({
+        session: access,
+        action: "stock_adjusted",
+        entityType: "InventoryAdjustment",
+        entityId: String(adjustment._id),
+        detail: `${product.name} × ${qty} · out · wastage_customer`,
+        req,
+      });
       return NextResponse.json(
         {
           ok: true,
@@ -300,6 +309,15 @@ export async function POST(req: Request) {
         adjustmentId = String(adjustment._id);
       }
 
+      recordAudit({
+        session: access,
+        action: "stock_adjusted",
+        entityType: "InventoryAdjustment",
+        entityId: adjustmentId,
+        detail: `${product.name} × ${qty} · out · ${reason}`,
+        req,
+      });
+
       return NextResponse.json({
         ok: true,
         direction: "out",
@@ -359,6 +377,15 @@ export async function POST(req: Request) {
       notes: notes || "Restock adjustment",
       createdBy,
       ...branchStamp,
+    });
+
+    recordAudit({
+      session: access,
+      action: "stock_adjusted",
+      entityType: "InventoryAdjustment",
+      entityId: String(adjustment._id),
+      detail: `${product.name} × ${qty} · in · restock`,
+      req,
     });
 
     return NextResponse.json(

@@ -218,7 +218,7 @@ export default function DashboardPage() {
 
       <div className={`mt-6 grid gap-6 ${canPos || canInventory ? "xl:grid-cols-3" : ""}`}>
         {canPos && (
-          <Panel className="animate-fade-up xl:col-span-2">
+          <Panel className="animate-fade-up self-start xl:col-span-2">
             <PanelHeader
               title="Weekly Sales Mix"
               subtitle="Retail · Wholesale · Remix"
@@ -229,7 +229,7 @@ export default function DashboardPage() {
         )}
 
         {!canPos && canInventory && (
-          <Panel className="animate-fade-up xl:col-span-2">
+          <Panel className="animate-fade-up self-start xl:col-span-2">
             <PanelHeader
               title="Low Stock Watchlist"
               subtitle="Most urgent reorders first"

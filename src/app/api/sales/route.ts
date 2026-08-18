@@ -6,6 +6,7 @@ import { SaleError } from "@/lib/sales/errors";
 import { warmSaleCaches } from "@/lib/sales/validateSale";
 import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
+import { recordAudit } from "@/lib/audit/log";
 import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapSale(s: Record<string, unknown>) {
@@ -120,6 +121,17 @@ export async function POST(req: Request) {
       branchId: access?.branchId ?? undefined,
       branchName: access?.branchName ?? undefined,
     });
+
+    if (!deduplicated) {
+      recordAudit({
+        session: access,
+        action: "sale_created",
+        entityType: "Sale",
+        entityId: String((sale as { id?: string; _id?: unknown }).id ?? (sale as { _id?: unknown })._id ?? ""),
+        detail: `${body.customerName || body.customerPhone || "walk-in"} · ${body.payment || ""}`,
+        req,
+      });
+    }
 
     const payload = { ...mapSale(toJSON(sale)!), deduplicated, timingMs };
     const res = NextResponse.json(payload, {
