@@ -4,7 +4,7 @@ import { AppSettings } from "@/lib/models";
 import { smsConfigured } from "@/lib/notifications/sms";
 import { invalidateReceiptSettingsCache } from "@/lib/receipt/server";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 function normalizeSalespeople(value: unknown, fallbackName?: string) {
   const list = Array.isArray(value)
@@ -69,7 +69,7 @@ export async function GET(req: Request) {
     return NextResponse.json(withSalesTeamDefaults(toJSON(settings)!));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load settings" },
+      { error: safeErrorMessage(error, "Failed to load settings") },
       { status: 500 },
     );
   }
@@ -114,7 +114,7 @@ export async function PUT(req: Request) {
     return NextResponse.json(withSalesTeamDefaults(toJSON(settings)!));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update settings" },
+      { error: safeErrorMessage(error, "Failed to update settings") },
       { status: 400 },
     );
   }

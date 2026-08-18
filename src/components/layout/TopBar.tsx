@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 
 const PAGE_TITLES: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
-  { href: "/pos", label: "Sales Counter" },
+  { href: "/pos", label: "POS" },
   { href: "/inventory/low-stock", label: "Low Stock" },
   { href: "/inventory", label: "Inventory" },
   { href: "/formulas", label: "Formulas & BOM" },

@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Quotation } from "@/lib/models";
 import { loadQuotationSettings, quotationDocFromRecord } from "@/lib/quotation/server";
 import { renderQuotationHtml } from "@/lib/quotation/template";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -31,7 +31,7 @@ export async function GET(req: Request, ctx: Ctx) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to render quotation",
+        error: safeErrorMessage(error, "Failed to render quotation"),
       },
       { status: 500 },
     );

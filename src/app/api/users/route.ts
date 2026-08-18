@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import {
   isAuthResponse,
   requirePermission,
@@ -25,7 +26,7 @@ export async function GET(req: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to list users",
+        error: safeErrorMessage(error, "Failed to list users"),
       },
       { status: 500 },
     );
@@ -138,7 +139,7 @@ export async function POST(req: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to create user",
+        error: safeErrorMessage(error, "Failed to create user"),
       },
       { status: 400 },
     );

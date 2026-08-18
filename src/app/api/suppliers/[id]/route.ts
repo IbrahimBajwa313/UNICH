@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Supplier } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -25,7 +25,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     return NextResponse.json(toJSON(supplier));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update supplier" },
+      { error: safeErrorMessage(error, "Failed to update supplier") },
       { status: 400 },
     );
   }
@@ -45,7 +45,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete supplier" },
+      { error: safeErrorMessage(error, "Failed to delete supplier") },
       { status: 500 },
     );
   }

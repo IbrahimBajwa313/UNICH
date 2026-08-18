@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { warnIfNegativeStock } from "@/lib/inventory/stockCheck";
 import { Product } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 const BUCKETS = [
   "stockSellable",
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to transfer stock",
+          safeErrorMessage(error, "Failed to transfer stock"),
       },
       { status: 400 },
     );

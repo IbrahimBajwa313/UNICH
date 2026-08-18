@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { FifoLayer, ImportBatch, Product } from "@/lib/models";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
@@ -85,7 +85,7 @@ export async function POST(req: Request, ctx: Ctx) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to undo import" },
+      { error: safeErrorMessage(error, "Failed to undo import") },
       { status: 500 },
     );
   }

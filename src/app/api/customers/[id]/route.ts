@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { requireRole } from "@/lib/auth/guards";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -27,7 +27,7 @@ export async function GET(req: Request, ctx: Ctx) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load customer" },
+      { error: safeErrorMessage(error, "Failed to load customer") },
       { status: 500 },
     );
   }
@@ -52,7 +52,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     return NextResponse.json(toJSON(customer));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update customer" },
+      { error: safeErrorMessage(error, "Failed to update customer") },
       { status: 400 },
     );
   }
@@ -73,7 +73,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete customer" },
+      { error: safeErrorMessage(error, "Failed to delete customer") },
       { status: 500 },
     );
   }

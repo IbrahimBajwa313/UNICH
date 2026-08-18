@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { defaultLowStockAt } from "@/lib/inventory/stockCheck";
 import { Product } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export async function GET(req: Request) {
   try {
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(products));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load products" },
+      { error: safeErrorMessage(error, "Failed to load products") },
       { status: 500 },
     );
   }
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     return NextResponse.json(toJSON(product), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create product" },
+      { error: safeErrorMessage(error, "Failed to create product") },
       { status: 400 },
     );
   }

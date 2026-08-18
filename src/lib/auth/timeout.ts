@@ -1,5 +1,5 @@
 /** Hard budget for auth API + client wait (ms). */
-export const AUTH_TIMEOUT_MS = 3000;
+export const AUTH_TIMEOUT_MS = 20000;
 
 /**
  * Race a promise against a deadline. Clears the timer on settle.

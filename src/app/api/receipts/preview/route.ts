@@ -3,7 +3,7 @@ import { buildReceiptDoc } from "@/lib/receipt/document";
 import { loadReceiptSettings, parseFormat } from "@/lib/receipt/server";
 import { renderReceiptHtml } from "@/lib/receipt/template";
 import type { ReceiptLine } from "@/lib/receipt/types";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Body = {
   format?: string;
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to render draft bill",
+          safeErrorMessage(error, "Failed to render draft bill"),
       },
       { status: 400 },
     );

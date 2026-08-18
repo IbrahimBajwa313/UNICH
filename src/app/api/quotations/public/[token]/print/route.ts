@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import { connectDB } from "@/lib/db";
 import { Quotation } from "@/lib/models";
 import { loadQuotationSettings, quotationDocFromRecord } from "@/lib/quotation/server";
@@ -28,7 +29,7 @@ export async function GET(req: Request, ctx: Ctx) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to render quotation",
+        error: safeErrorMessage(error, "Failed to render quotation"),
       },
       { status: 500 },
     );

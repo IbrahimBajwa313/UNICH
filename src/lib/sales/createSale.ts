@@ -51,7 +51,7 @@ let salespersonCache:
 const SALESPERSON_CACHE_MS = 120_000;
 
 /** Primary-only ack — much faster than connection-string w=majority on Atlas. */
-const FAST_WC = { w: 1 as const, j: false };
+export const FAST_WC = { w: 1 as const, j: false };
 
 function isDuplicateKey(err: unknown): boolean {
   return (
@@ -129,7 +129,7 @@ type CustomerTouchUpdate = {
  * person's orders on different dates (e.g. the 12th and the 19th) land in one history
  * instead of splitting across duplicate customers.
  */
-async function resolveCustomerByPhone(
+export async function resolveCustomerByPhone(
   phone: string,
   givenName: string | undefined,
   update: CustomerTouchUpdate,

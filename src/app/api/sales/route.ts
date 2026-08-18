@@ -5,7 +5,7 @@ import { createSale } from "@/lib/sales/createSale";
 import { SaleError } from "@/lib/sales/errors";
 import { warmSaleCaches } from "@/lib/sales/validateSale";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapSale(s: Record<string, unknown>) {
@@ -95,7 +95,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(sales).map(mapSale));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load sales" },
+      { error: safeErrorMessage(error, "Failed to load sales") },
       { status: 500 },
     );
   }
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
     return res;
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to create sale";
+      safeErrorMessage(error, "Failed to create sale");
     const status = error instanceof SaleError ? 400 : 400;
     return NextResponse.json(
       {

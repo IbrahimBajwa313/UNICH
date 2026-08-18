@@ -8,7 +8,7 @@ import {
 } from "@/lib/purchases/applyFifoFromPurchase";
 import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 function mapLine(l: Record<string, unknown>) {
   return {
@@ -66,7 +66,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(purchases).map(mapPO));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load purchases" },
+      { error: safeErrorMessage(error, "Failed to load purchases") },
       { status: 500 },
     );
   }
@@ -126,7 +126,7 @@ export async function POST(req: Request) {
     return NextResponse.json(mapPO(toJSON(purchase)!), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create purchase" },
+      { error: safeErrorMessage(error, "Failed to create purchase") },
       { status: 400 },
     );
   }

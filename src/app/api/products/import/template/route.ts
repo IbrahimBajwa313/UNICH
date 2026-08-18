@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { buildTemplateWorkbook } from "@/lib/excel/template";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to build template" },
+      { error: safeErrorMessage(error, "Failed to build template") },
       { status: 500 },
     );
   }

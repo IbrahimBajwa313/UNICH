@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { FileDown, MessageCircle, ArrowRightLeft, Pencil, History, Link as LinkIcon } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -39,12 +40,19 @@ const statusTone: Record<QuotationStatus, "neutral" | "success" | "warning" | "d
 };
 
 export default function QuotationsPage() {
+  const router = useRouter();
   const { hasPermission } = useAuth();
   const canWrite = hasPermission("quotations:write");
   const [filter, setFilter] = useState<QuotationStatus | "all">("all");
   const [toast, setToast] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"ok" | "err">("ok");
-  const { data: quotations, loading, error, reload } = useApiData<Quotation[]>(`/api/quotations?status=${filter}`);
+  const {
+    data: quotations,
+    loading,
+    error,
+    reload,
+    setData: setQuotations,
+  } = useApiData<Quotation[]>(`/api/quotations?status=${filter}`);
   const { data: products } = useApiData<Product[]>("/api/products");
   const { data: settings } = useApiData<AppSettings>("/api/settings");
   const [editor, setEditor] = useState<{ mode: "new" | "edit" | "revise"; quotation: Quotation | null } | null>(null);
@@ -63,26 +71,34 @@ export default function QuotationsPage() {
     requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
+  // Perf: patch the row from the API response instead of a full reload —
+  // skips a whole extra GET /api/quotations round trip on every status flip.
+  function patchQuotation(updated: Quotation) {
+    setQuotations((prev) => prev?.map((q) => (q.id === updated.id ? updated : q)) ?? prev);
+  }
+
   async function setStatus(id: string, status: QuotationStatus) {
+    // Optimistic: flip the dropdown instantly, reconcile with the server in the
+    // background, and roll back only if the request actually fails.
+    const previous = rows.find((q) => q.id === id);
+    setQuotations((prev) => prev?.map((q) => (q.id === id ? { ...q, status } : q)) ?? prev);
     try {
-      await api(`/api/quotations/${id}`, { method: "PUT", body: JSON.stringify({ status }) });
-      await reload();
+      const updated = await api<Quotation>(`/api/quotations/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ status }),
+      });
+      patchQuotation(updated);
     } catch (err) {
+      if (previous) patchQuotation(previous);
       flash(err instanceof Error ? err.message : "Could not update quotation", 3000, "err");
     }
   }
 
-  async function convert(id: string) {
-    setBusyId(id);
-    try {
-      await api(`/api/quotations/${id}`, { method: "POST", body: JSON.stringify({ action: "convert" }) });
-      flash("Converted to sale");
-      await reload();
-    } catch (err) {
-      flash(err instanceof Error ? err.message : "Could not convert quotation", 4000, "err");
-    } finally {
-      setBusyId(null);
-    }
+  // QTN-06: convert now happens on the real POS Sales Counter, not silently
+  // in the background — the bill pre-fills there and completes like any sale
+  // (real stock deduction, printable receipt), then hands off to Customers.
+  function goConvert(id: string) {
+    router.push(`/pos?fromQuotation=${id}`);
   }
 
   async function printQuotation(q: Quotation) {
@@ -156,7 +172,7 @@ export default function QuotationsPage() {
         flash(`Email sent to ${res.email.to} · WhatsApp opened`, 6000, "ok");
       }
       await navigator.clipboard?.writeText(approvalUrl).catch(() => {});
-      await reload();
+      await reload({ silent: true });
     } catch (err) {
       flash(err instanceof Error ? err.message : "Could not share quotation", 8000, "err");
     } finally {
@@ -167,7 +183,7 @@ export default function QuotationsPage() {
   function onSaved(q: Quotation) {
     setEditor(null);
     flash(`Quotation ${q.number} saved`);
-    void reload();
+    void reload({ silent: true });
   }
 
   if (loading || !settings) return <LoadingState label="Loading quotations…" />;
@@ -313,7 +329,7 @@ export default function QuotationsPage() {
                       </Button>
                     ) : null}
                     {canWrite && q.status === "approved" ? (
-                      <Button size="sm" variant="secondary" disabled={busyId === q.id} onClick={() => void convert(q.id)}>
+                      <Button size="sm" variant="secondary" onClick={() => goConvert(q.id)}>
                         <ArrowRightLeft className="h-3.5 w-3.5" />
                         Convert
                       </Button>

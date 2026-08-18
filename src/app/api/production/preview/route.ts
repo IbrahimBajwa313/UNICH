@@ -8,7 +8,7 @@ import { checkStockAvailability } from "@/lib/inventory/stockCheck";
 import { planProduction } from "@/lib/production/planProduction";
 import { SaleError } from "@/lib/sales/errors";
 import { Product } from "@/lib/models";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export async function POST(req: Request) {
   try {
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to preview production",
+          safeErrorMessage(error, "Failed to preview production"),
       },
       { status: 400 },
     );

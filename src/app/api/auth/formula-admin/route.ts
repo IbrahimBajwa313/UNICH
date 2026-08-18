@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import {
   clearFormulaAdminCookieHeader,
   createFormulaAdminToken,
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to unlock formulas",
+          safeErrorMessage(error, "Failed to unlock formulas"),
       },
       { status: 400 },
     );

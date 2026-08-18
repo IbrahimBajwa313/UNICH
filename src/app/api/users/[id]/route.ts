@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import {
   isAuthResponse,
   requirePermission,
@@ -31,7 +32,7 @@ export async function GET(req: Request, ctx: Ctx) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to load user",
+        error: safeErrorMessage(error, "Failed to load user"),
       },
       { status: 500 },
     );
@@ -156,7 +157,7 @@ export async function PUT(req: Request, ctx: Ctx) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to update user",
+        error: safeErrorMessage(error, "Failed to update user"),
       },
       { status: 400 },
     );
@@ -196,7 +197,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to delete user",
+        error: safeErrorMessage(error, "Failed to delete user"),
       },
       { status: 400 },
     );

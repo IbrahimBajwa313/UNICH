@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import {
   isAuthResponse,
   requirePermission,
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to list branches",
+          safeErrorMessage(error, "Failed to list branches"),
       },
       { status: 500 },
     );
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to create branch",
+          safeErrorMessage(error, "Failed to create branch"),
       },
       { status: 400 },
     );

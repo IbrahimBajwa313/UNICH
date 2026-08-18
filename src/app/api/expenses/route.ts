@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Expense } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 function mapExpense(e: Record<string, unknown>) {
   return {
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(expenses).map(mapExpense));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load expenses" },
+      { error: safeErrorMessage(error, "Failed to load expenses") },
       { status: 500 },
     );
   }
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     return NextResponse.json(mapExpense(toJSON(expense)!), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create expense" },
+      { error: safeErrorMessage(error, "Failed to create expense") },
       { status: 400 },
     );
   }

@@ -5,7 +5,7 @@ import {
   parseReportPeriod,
 } from "@/lib/reports/period";
 import { buildSaleReport, type SaleReportStatus } from "@/lib/reports/salesReport";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to load sales report",
+          safeErrorMessage(error, "Failed to load sales report"),
       },
       { status: 500 },
     );

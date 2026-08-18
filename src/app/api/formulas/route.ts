@@ -14,7 +14,7 @@ import { fillDefaultRemixPackaging } from "@/lib/formulas/defaultPackaging";
 import { validateFormulaInput } from "@/lib/formulas/validateFormula";
 import { Formula } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 /**
  * GET formulas.
@@ -69,7 +69,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(formulas).map(mapFormula));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load formulas" },
+      { error: safeErrorMessage(error, "Failed to load formulas") },
       { status: 500 },
     );
   }
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
     return NextResponse.json(mapFormula(toJSON(formula)!), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create formula" },
+      { error: safeErrorMessage(error, "Failed to create formula") },
       { status: 400 },
     );
   }

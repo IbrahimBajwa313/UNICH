@@ -312,7 +312,7 @@ async function main() {
   }
 
   const packaging = await Product.find({
-    category: { $in: ["Packaging", "Gift Boxes"] },
+    category: { $in: ["Packaging", "Coffret"] },
   }).lean();
   const byRole: Record<string, string[]> = {};
   for (const p of packaging) {

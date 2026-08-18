@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Customer } from "@/lib/models";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapCustomer(c: Record<string, unknown>) {
@@ -40,7 +40,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(customers).map(mapCustomer));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load customers" },
+      { error: safeErrorMessage(error, "Failed to load customers") },
       { status: 500 },
     );
   }
@@ -88,7 +88,7 @@ export async function POST(req: Request) {
     return NextResponse.json(mapCustomer(toJSON(customer)!), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create customer" },
+      { error: safeErrorMessage(error, "Failed to create customer") },
       { status: 400 },
     );
   }

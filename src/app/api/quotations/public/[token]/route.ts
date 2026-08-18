@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import { connectDB } from "@/lib/db";
 import { Quotation } from "@/lib/models";
 import { loadQuotationSettings } from "@/lib/quotation/server";
@@ -77,7 +78,7 @@ export async function GET(req: Request, ctx: Ctx) {
     return NextResponse.json(toPublicView(quotation, settings));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load quotation" },
+      { error: safeErrorMessage(error, "Failed to load quotation") },
       { status: 500 },
     );
   }
@@ -129,7 +130,7 @@ export async function POST(req: Request, ctx: Ctx) {
     return NextResponse.json(toPublicView(quotation, settings));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to record decision" },
+      { error: safeErrorMessage(error, "Failed to record decision") },
       { status: 500 },
     );
   }

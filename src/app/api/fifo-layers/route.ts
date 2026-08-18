@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { FifoLayer } from "@/lib/models";
 import { addFifoLayer } from "@/lib/inventory";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export async function GET(req: Request) {
   try {
@@ -32,7 +32,7 @@ export async function GET(req: Request) {
     );
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load FIFO layers" },
+      { error: safeErrorMessage(error, "Failed to load FIFO layers") },
       { status: 500 },
     );
   }
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     return NextResponse.json(toJSON(layer), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create FIFO layer" },
+      { error: safeErrorMessage(error, "Failed to create FIFO layer") },
       { status: 400 },
     );
   }

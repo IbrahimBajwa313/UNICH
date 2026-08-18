@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   FileText,
   FlaskConical,
@@ -41,17 +42,29 @@ const quotationTone: Record<string, "success" | "danger" | "warning" | "info" | 
 };
 
 export default function CustomersPage() {
+  return (
+    <Suspense fallback={null}>
+      <CustomersPageInner />
+    </Suspense>
+  );
+}
+
+function CustomersPageInner() {
   const { user } = useAuth();
   /** CRM-12: Sales Staff view/create/edit; delete is Admin-only. */
   const canDelete = user?.role === "admin" || user?.role === "super_admin";
 
+  const searchParams = useSearchParams();
   const { data: customers, loading, error, reload } = useApiData<Customer[]>("/api/customers");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<Partial<Customer> | null>(null);
   const [dupMatch, setDupMatch] = useState<Customer | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const activeId = selectedId || customers?.[0]?.id || "";
+
+  // POS "Complete Sale" on a converted quotation hands off here with ?customerId=
+  // — just another initial-selection fallback, same role as "first customer".
+  const activeId = selectedId || searchParams.get("customerId") || customers?.[0]?.id || "";
   const customerList = customers ?? emptyCustomers;
   const selected = customerList.find((c) => c.id === activeId);
 

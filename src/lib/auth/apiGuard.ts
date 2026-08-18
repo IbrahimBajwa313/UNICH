@@ -17,6 +17,29 @@ function deny(message: string, status = 403) {
   return NextResponse.json({ error: message }, { status });
 }
 
+const DB_CONNECTION_ERROR_NAMES = new Set([
+  "MongoNetworkError",
+  "MongoNetworkTimeoutError",
+  "MongoServerSelectionError",
+  "MongooseServerSelectionError",
+  "MongoTimeoutError",
+]);
+
+/**
+ * Never leak raw Mongo/driver error text (can include internal file paths,
+ * connection strings) to API clients. Everything else still surfaces its
+ * own message so callers get actionable validation/business errors.
+ */
+export function safeErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && DB_CONNECTION_ERROR_NAMES.has(error.name)) {
+    if (process.env.NODE_ENV !== "production") {
+      return `${fallback} — DB connection error (dev only): ${error.name}: ${error.message}`;
+    }
+    return "Something went wrong. Please try again later.";
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 /**
  * Enforce session + path permission for an API request.
  * Returns `null` when the path is intentionally public (caller continues).

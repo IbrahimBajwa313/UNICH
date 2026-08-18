@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseFormat, receiptDocForSale } from "@/lib/receipt/server";
 import { renderReceiptHtml } from "@/lib/receipt/template";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -34,7 +34,7 @@ export async function GET(req: Request, context: RouteContext) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to render receipt",
+          safeErrorMessage(error, "Failed to render receipt"),
       },
       { status: 500 },
     );

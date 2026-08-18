@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Expense, Product, Sale } from "@/lib/models";
 import { moduleRoadmap } from "@/lib/constants";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export async function GET(req: Request) {
   try {
@@ -158,7 +158,7 @@ export async function GET(req: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load dashboard" },
+      { error: safeErrorMessage(error, "Failed to load dashboard") },
       { status: 500 },
     );
   }

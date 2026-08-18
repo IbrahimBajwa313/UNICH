@@ -25,7 +25,7 @@ import type { UserRole } from "@/lib/types";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pos", label: "Sales Counter", icon: ShoppingCart },
+  { href: "/pos", label: "POS", icon: ShoppingCart },
   { href: "/inventory", label: "Inventory", icon: Boxes },
   { href: "/inventory/low-stock", label: "Low Stock", icon: AlertTriangle },
   { href: "/formulas", label: "Formulas & BOM", icon: FlaskConical },

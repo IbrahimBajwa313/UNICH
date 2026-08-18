@@ -16,7 +16,7 @@ import {
 import { createSale } from "@/lib/sales/createSale";
 import { SaleError } from "@/lib/sales/errors";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 const ADJUSTMENT_SUPPLIER = "Stock Adjustment";
 
@@ -390,7 +390,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to adjust inventory",
+          safeErrorMessage(error, "Failed to adjust inventory"),
       },
       { status: 400 },
     );
@@ -444,7 +444,7 @@ export async function PUT(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to preview adjustment",
+          safeErrorMessage(error, "Failed to preview adjustment"),
       },
       { status: 400 },
     );

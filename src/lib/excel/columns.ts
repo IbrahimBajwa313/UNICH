@@ -1,21 +1,15 @@
 import type { Concentration, ItemType, ProductCategory, StockUnit } from "@/lib/types";
 
 export const PRODUCT_CATEGORIES: ProductCategory[] = [
-  "Brand Perfumes",
-  "Signature Brand",
-  "Customized Perfumes",
-  "Perfume Oils",
-  "Oud Oils",
-  "Itar",
+  "Brands",
+  "Remix",
   "Body Mist",
-  "Roll-ons",
-  "Deodorants",
+  "Body Spray",
+  "Coffret",
   "Bakhoor",
-  "Incense Burners",
-  "Gift Boxes",
-  "Perfume Sets",
   "Single Notes",
-  "Mass Perfumes",
+  "Signature Brand",
+  "Niche Brand",
   "Packaging",
 ];
 
@@ -39,20 +33,14 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   raw: "Raw Material",
 };
 
-export const OIL_CATEGORIES = new Set<ProductCategory>([
-  "Perfume Oils",
-  "Oud Oils",
-  "Single Notes",
-  "Itar",
-]);
+export const OIL_CATEGORIES = new Set<ProductCategory>(["Single Notes"]);
 
 export const PCS_PREFERRED_CATEGORIES = new Set<ProductCategory>([
-  "Brand Perfumes",
+  "Brands",
   "Signature Brand",
-  "Gift Boxes",
-  "Perfume Sets",
+  "Niche Brand",
+  "Coffret",
   "Packaging",
-  "Incense Burners",
 ]);
 
 /** Fixed Excel headers — order matters for template + parse. */
@@ -108,21 +96,15 @@ export function itemTypeToLabel(t: ItemType): string {
 
 export function categoryCode(category: string): string {
   const map: Record<string, string> = {
-    "Brand Perfumes": "BP",
-    "Signature Brand": "SB",
-    "Customized Perfumes": "CP",
-    "Perfume Oils": "PO",
-    "Oud Oils": "OO",
-    Itar: "IT",
+    Brands: "BR",
+    Remix: "RM",
     "Body Mist": "BM",
-    "Roll-ons": "RO",
-    Deodorants: "DE",
+    "Body Spray": "BS",
+    Coffret: "CF",
     Bakhoor: "BK",
-    "Incense Burners": "IB",
-    "Gift Boxes": "GB",
-    "Perfume Sets": "PS",
     "Single Notes": "SN",
-    "Mass Perfumes": "MP",
+    "Signature Brand": "SB",
+    "Niche Brand": "NB",
     Packaging: "PK",
   };
   return map[category] || "XX";

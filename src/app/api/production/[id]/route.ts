@@ -8,7 +8,7 @@ import { mapProductionOrder } from "@/lib/production/mapProduction";
 import { SaleError } from "@/lib/sales/errors";
 import { ProductionOrder } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -36,7 +36,7 @@ export async function GET(req: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to load production order",
+          safeErrorMessage(error, "Failed to load production order"),
       },
       { status: 500 },
     );

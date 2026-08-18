@@ -41,17 +41,24 @@ export async function connectDB() {
   if (cached.conn) return cached.conn;
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI!, {
-      bufferCommands: false,
-      // Fail fast so auth stays within ~3s instead of hanging on bad DNS/Atlas.
-      serverSelectionTimeoutMS: 2500,
-      connectTimeoutMS: 2500,
-      socketTimeoutMS: 20000,
-      family: 4,
-      // Keep sockets warm for POS complete (parallel reserve + layer + insert).
-      maxPoolSize: 24,
-      minPoolSize: 4,
-    });
+    cached.promise = mongoose
+      .connect(MONGODB_URI!, {
+        bufferCommands: false,
+        // Give Atlas TLS handshake room on slower networks (observed 4-15s here).
+        serverSelectionTimeoutMS: 15000,
+        connectTimeoutMS: 15000,
+        socketTimeoutMS: 20000,
+        family: 4,
+        // Keep sockets warm for POS complete (parallel reserve + layer + insert).
+        maxPoolSize: 24,
+        minPoolSize: 4,
+      })
+      .catch((err) => {
+        // Don't let one flaky attempt poison every request until restart —
+        // clear the cache so the next call retries a fresh connection.
+        cached.promise = null;
+        throw err;
+      });
   }
 
   cached.conn = await cached.promise;

@@ -7,7 +7,7 @@ import {
   type ExistingProductRef,
 } from "@/lib/excel/validate";
 import { AppSettings, ImportBatch, Product } from "@/lib/models";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 export const runtime = "nodejs";
 
@@ -138,7 +138,7 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to stage import" },
+      { error: safeErrorMessage(error, "Failed to stage import") },
       { status: 500 },
     );
   }

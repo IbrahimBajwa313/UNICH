@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Sale } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -38,7 +38,7 @@ export async function GET(req: Request, context: RouteContext) {
     return NextResponse.json(mapSale(toJSON(sale)!));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load sale" },
+      { error: safeErrorMessage(error, "Failed to load sale") },
       { status: 500 },
     );
   }
@@ -80,7 +80,7 @@ export async function PATCH(req: Request, context: RouteContext) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to update sale",
+        error: safeErrorMessage(error, "Failed to update sale"),
       },
       { status: 400 },
     );

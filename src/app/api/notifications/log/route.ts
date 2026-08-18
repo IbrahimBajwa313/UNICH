@@ -5,7 +5,7 @@ import { logDelivery } from "@/lib/notifications/log";
 import { receiptNumberFor } from "@/lib/receipt/document";
 import { toJSONList } from "@/lib/serialize";
 import type { DeliveryChannel, DeliveryStatus } from "@/lib/types";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 const CHANNELS: DeliveryChannel[] = ["print", "email", "whatsapp", "sms"];
 const STATUSES: DeliveryStatus[] = ["sent", "failed", "handoff", "printed"];
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to load delivery log",
+          safeErrorMessage(error, "Failed to load delivery log"),
       },
       { status: 500 },
     );
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to record delivery",
+          safeErrorMessage(error, "Failed to record delivery"),
       },
       { status: 400 },
     );

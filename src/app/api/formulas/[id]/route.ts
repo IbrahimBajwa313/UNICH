@@ -14,7 +14,7 @@ import { Formula } from "@/lib/models";
 import type { FormulaComponent } from "@/lib/types";
 import { toJSON } from "@/lib/serialize";
 import { invalidateDefaultRemixCache } from "@/lib/sales/validateSale";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -338,7 +338,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     return NextResponse.json(mapFormula(toJSON(formula)!));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update formula" },
+      { error: safeErrorMessage(error, "Failed to update formula") },
       { status: 400 },
     );
   }
@@ -362,7 +362,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete formula" },
+      { error: safeErrorMessage(error, "Failed to delete formula") },
       { status: 500 },
     );
   }

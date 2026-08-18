@@ -1,11 +1,15 @@
 import { randomBytes } from "crypto";
+import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Quotation, Sale } from "@/lib/models";
+import { deductFifoMany, refreshCostFifo } from "@/lib/inventory";
+import { Customer, Quotation, Sale } from "@/lib/models";
 import { computeQuotationTotals } from "@/lib/quotation/calc";
 import { normalizeQuotationLines } from "@/lib/quotation/lines";
+import { FAST_WC, resolveCustomerByPhone } from "@/lib/sales";
+import { SaleError } from "@/lib/sales/errors";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import type { QuotationStatus } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -28,6 +32,27 @@ const EDITABLE_ANY_STATUS = new Set([
   "customerAddress",
   "customerTrn",
 ]);
+
+/** POS "convert from quotation" screen prefills its bill from this. */
+export async function GET(req: Request, ctx: Ctx) {
+  try {
+    const access = requireApiAccess(req);
+    if (access !== null && isAuthResponse(access)) return access;
+
+    await connectDB();
+    const { id } = await ctx.params;
+    const quotation = await Quotation.findById(id);
+    if (!quotation) {
+      return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
+    }
+    return NextResponse.json(mapQuote(toJSON(quotation)!));
+  } catch (error) {
+    return NextResponse.json(
+      { error: safeErrorMessage(error, "Failed to load quotation") },
+      { status: 500 },
+    );
+  }
+}
 
 export async function PUT(req: Request, ctx: Ctx) {
   try {
@@ -104,11 +129,11 @@ export async function PUT(req: Request, ctx: Ctx) {
       });
     }
 
-    await quotation.save();
+    await quotation.save(FAST_WC);
     return NextResponse.json(mapQuote(toJSON(quotation)!));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update quotation" },
+      { error: safeErrorMessage(error, "Failed to update quotation") },
       { status: 400 },
     );
   }
@@ -135,7 +160,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete quotation" },
+      { error: safeErrorMessage(error, "Failed to delete quotation") },
       { status: 500 },
     );
   }
@@ -229,7 +254,7 @@ export async function POST(req: Request, ctx: Ctx) {
         toVersion: quotation.version,
       });
 
-      await quotation.save();
+      await quotation.save(FAST_WC);
       return NextResponse.json(mapQuote(toJSON(quotation)!));
     }
 
@@ -246,7 +271,7 @@ export async function POST(req: Request, ctx: Ctx) {
         by: access?.name || "System",
         action: "shared",
       });
-      await quotation.save();
+      await quotation.save(FAST_WC);
       return NextResponse.json({
         quotation: mapQuote(toJSON(quotation)!),
         approvalToken: quotation.approvalToken,
@@ -273,6 +298,9 @@ export async function POST(req: Request, ctx: Ctx) {
         );
       }
 
+      const PAYMENT_METHODS = new Set(["cash", "card", "bank", "credit", "mixed"]);
+      const payment = PAYMENT_METHODS.has(body.payment) ? body.payment : "credit";
+
       // QTN-06: carry every line item across as-is — no re-entry.
       const lines = quotation.lines.map((line: (typeof quotation.lines)[number]) => ({
         productId: line.productId,
@@ -285,40 +313,139 @@ export async function POST(req: Request, ctx: Ctx) {
         packagingProductIds: line.packagingProductIds,
       }));
 
-      const sale = await Sale.create({
+      // Deduct real stock before touching the customer/sale — a POS-driven convert
+      // is a real checkout, not just a paper record. Lines without a catalog
+      // product (e.g. a custom remix blend, which has no oil/formula captured at
+      // quotation time) are skipped here, same as before this change.
+      const deductable = lines.filter(
+        (l: { productId?: unknown; qty: number }) => l.productId,
+      ) as Array<{ productId: mongoose.Types.ObjectId; qty: number; name: string }>;
+      const deductions = await deductFifoMany(
+        deductable.map((l) => ({
+          productId: String(l.productId),
+          qty: l.qty,
+          productName: l.name,
+        })),
+      );
+      const inventoryDeductions = deductable.map((l, i) => {
+        const result = deductions.get(String(l.productId)) ?? { costTotal: 0, batches: [] };
+        return {
+          productId: l.productId,
+          productName: l.name,
+          qty: l.qty,
+          reason: "quotation_convert",
+          lineIndex: i,
+          costTotal: result.costTotal,
+          batches: result.batches.map((b) => ({
+            layerId: new mongoose.Types.ObjectId(b.layerId),
+            qty: b.qty,
+            unitCost: b.unitCost,
+            purchaseDate: b.purchaseDate,
+          })),
+        };
+      });
+
+      // CRM-02: a converted quotation is a real order — the customer must show up
+      // in Customers with this purchase, same as a POS checkout does (createSale()).
+      const productNames = [...new Set(lines.map((l: { name: string }) => l.name).filter(Boolean))];
+      const customerTouch = {
+        $set: {
+          lastVisit: new Date(),
+          ...(quotation.customerName ? { name: quotation.customerName } : {}),
+        },
+        $inc: {
+          totalPurchases: quotation.total,
+          ...(payment === "credit" ? { creditBalance: quotation.total } : {}),
+        },
+        ...(productNames.length > 0
+          ? { $addToSet: { productsRequested: { $each: productNames } } }
+          : {}),
+      };
+      let customerObjectId = quotation.customerId;
+      if (customerObjectId) {
+        await Customer.updateOne({ _id: customerObjectId }, customerTouch, {
+          writeConcern: FAST_WC,
+        });
+      } else {
+        customerObjectId = await resolveCustomerByPhone(
+          quotation.customerPhone,
+          quotation.customerName,
+          customerTouch,
+        );
+        quotation.customerId = customerObjectId;
+      }
+
+      // Perf: skip mongoose's Sale.create()/quotation.save() (full-document
+      // validation + default majority write concern) — insert the sale natively
+      // and patch just the changed quotation fields, both at primary-only ack,
+      // and run them in parallel since neither write depends on the other.
+      const saleId = new mongoose.Types.ObjectId();
+      const now = new Date();
+      const saleDoc = {
+        _id: saleId,
         customerPhone: quotation.customerPhone,
         customerName: quotation.customerName,
-        customerId: quotation.customerId,
+        customerId: customerObjectId,
         salesperson: access?.name || "Quotation Conversion",
-        payment: "credit",
+        payment,
         status: "completed",
         saleType: "Wholesale",
         subtotal: quotation.subtotal,
         total: quotation.total,
         lines,
-        branchId: access?.branchId ?? undefined,
-        branchName: access?.branchName ?? undefined,
-      });
-      quotation.convertedToSaleId = sale._id;
-      quotation.status = "converted";
-      quotation.history.push({
-        at: new Date(),
+        inventoryDeductions,
+        ...(access?.branchId
+          ? { branchId: new mongoose.Types.ObjectId(access.branchId) }
+          : {}),
+        ...(access?.branchName ? { branchName: access.branchName } : {}),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const historyEntry = {
+        at: now,
         by: access?.name || "System",
         action: "converted",
-        detail: String(sale._id),
-      });
-      await quotation.save();
+        detail: String(saleId),
+      };
+
+      quotation.convertedToSaleId = saleId;
+      quotation.status = "converted";
+      quotation.history.push(historyEntry);
+
+      await Promise.all([
+        Sale.collection.insertOne(saleDoc, { writeConcern: FAST_WC }),
+        Quotation.updateOne(
+          { _id: quotation._id },
+          {
+            $set: {
+              convertedToSaleId: saleId,
+              status: "converted",
+              ...(quotation.customerId ? { customerId: quotation.customerId } : {}),
+            },
+            $push: { history: historyEntry },
+          },
+          { writeConcern: FAST_WC },
+        ),
+      ]);
+
+      if (deductable.length > 0) {
+        void refreshCostFifo(deductable.map((l) => String(l.productId))).catch(() => {
+          /* non-fatal — after response */
+        });
+      }
+
       return NextResponse.json({
         quotation: mapQuote(toJSON(quotation)!),
-        sale: toJSON(sale),
+        sale: toJSON(saleDoc),
       });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to process quotation" },
-      { status: 500 },
+      { error: safeErrorMessage(error, "Failed to process quotation") },
+      { status: error instanceof SaleError ? 400 : 500 },
     );
   }
 }

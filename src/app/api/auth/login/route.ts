@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import {
   ensureAuthBootstrap,
   isAuthBootstrapped,
@@ -142,7 +143,7 @@ export async function POST(req: Request) {
     return await withAuthTimeout(loginHandler(req), "Login", AUTH_TIMEOUT_MS);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Login failed";
+      safeErrorMessage(error, "Login failed");
     const timedOut = /too long/i.test(message);
     return NextResponse.json(
       { error: message },

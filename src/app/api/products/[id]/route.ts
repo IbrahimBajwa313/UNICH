@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { FifoLayer, Product } from "@/lib/models";
 import { warnIfNegativeStock } from "@/lib/inventory/stockCheck";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -21,7 +21,7 @@ export async function GET(req: Request, ctx: Ctx) {
     return NextResponse.json(toJSON(product));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load product" },
+      { error: safeErrorMessage(error, "Failed to load product") },
       { status: 500 },
     );
   }
@@ -64,7 +64,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update product" },
+      { error: safeErrorMessage(error, "Failed to update product") },
       { status: 400 },
     );
   }
@@ -85,7 +85,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete product" },
+      { error: safeErrorMessage(error, "Failed to delete product") },
       { status: 500 },
     );
   }

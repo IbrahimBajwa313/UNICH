@@ -16,7 +16,7 @@ import { renderReceiptHtml } from "@/lib/receipt/template";
 import { receiptSmsText, receiptText } from "@/lib/receipt/text";
 import type { ReceiptLine } from "@/lib/receipt/types";
 import type { DeliveryKind } from "@/lib/types";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Channel = "email" | "whatsapp" | "sms";
 type LegacyChannel = Channel | "both";
@@ -243,7 +243,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to send notification",
+          safeErrorMessage(error, "Failed to send notification"),
       },
       { status: 400 },
     );
@@ -358,7 +358,7 @@ function deliverWhatsApp(toPhone: string, message: string): ChannelResult {
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "WhatsApp failed",
+      error: safeErrorMessage(err, "WhatsApp failed"),
     };
   }
 }

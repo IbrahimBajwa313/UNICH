@@ -9,7 +9,7 @@ import { mapFormula } from "@/lib/formulas/mapFormula";
 import { Formula } from "@/lib/models";
 import { toJSON } from "@/lib/serialize";
 import type { Formula as FormulaType } from "@/lib/types";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -57,7 +57,7 @@ export async function GET(req: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Failed to export formula",
+          safeErrorMessage(error, "Failed to export formula"),
       },
       { status: 500 },
     );

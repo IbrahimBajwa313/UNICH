@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import { permissionsForRole } from "@/lib/auth/roles";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import type { AuthMe } from "@/lib/types";
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to load session",
+        error: safeErrorMessage(error, "Failed to load session"),
       },
       { status: 500 },
     );

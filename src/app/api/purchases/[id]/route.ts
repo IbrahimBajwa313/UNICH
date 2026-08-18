@@ -8,7 +8,7 @@ import {
 } from "@/lib/purchases/applyFifoFromPurchase";
 import { recalcSupplierAvgLeadDays } from "@/lib/purchases/supplierLeadTime";
 import { toJSON } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -144,7 +144,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     return NextResponse.json(mapPO(toJSON(purchase)!));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update purchase" },
+      { error: safeErrorMessage(error, "Failed to update purchase") },
       { status: 400 },
     );
   }
@@ -168,7 +168,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete purchase" },
+      { error: safeErrorMessage(error, "Failed to delete purchase") },
       { status: 500 },
     );
   }

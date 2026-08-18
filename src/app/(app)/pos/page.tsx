@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Banknote,
   CheckCircle2,
@@ -45,6 +46,7 @@ import type {
   Formula,
   PaymentMethod,
   Product,
+  Quotation,
 } from "@/lib/types";
 
 type CatalogFilter = "all" | "ready" | "oil" | "custom";
@@ -196,6 +198,16 @@ function createIdempotencyKey() {
 }
 
 export default function PosPage() {
+  return (
+    <Suspense fallback={null}>
+      <PosPageInner />
+    </Suspense>
+  );
+}
+
+function PosPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     data: products,
     loading,
@@ -223,6 +235,84 @@ export default function PosPage() {
   const [matchedCustomerId, setMatchedCustomerId] = useState<string | null>(
     null,
   );
+  // QTN-06: "Convert" on an approved quotation lands here with ?fromQuotation=<id> —
+  // the bill pre-fills from the quotation instead of the cart, and Complete Sale
+  // runs the real checkout (stock deduction included) via the quotation itself.
+  const fromQuotationId = searchParams.get("fromQuotation");
+  const [quotationMode, setQuotationMode] = useState<Quotation | null>(null);
+  const [quotationLoadError, setQuotationLoadError] = useState<string | null>(null);
+  const [completingQuotation, setCompletingQuotation] = useState(false);
+  useEffect(() => {
+    if (!fromQuotationId) return;
+    let cancelled = false;
+    api<Quotation>(`/api/quotations/${fromQuotationId}`)
+      .then((q) => {
+        if (cancelled) return;
+        if (q.status !== "approved") {
+          setQuotationLoadError(`Quotation ${q.number} is not approved (status: ${q.status}).`);
+          return;
+        }
+        if (q.convertedToSaleId) {
+          setQuotationLoadError(`Quotation ${q.number} was already converted.`);
+          return;
+        }
+        setQuotationMode(q);
+        setCustomerName(q.customerName);
+        setPhone(q.customerPhone);
+        setEmail(q.customerEmail || "");
+        setPayment("credit");
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setQuotationLoadError(
+            err instanceof Error ? err.message : "Could not load quotation",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromQuotationId]);
+
+  function exitQuotationMode() {
+    setQuotationMode(null);
+    setQuotationLoadError(null);
+    setCustomerName("");
+    setPhone("");
+    setEmail("");
+    router.replace("/pos");
+  }
+
+  async function completeQuotationSale() {
+    if (!quotationMode) return;
+    setCompletingQuotation(true);
+    try {
+      const res = await api<{
+        quotation: Quotation;
+        sale: { id: string; customerId?: string; total?: number };
+      }>(`/api/quotations/${quotationMode.id}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "convert", payment }),
+      });
+      flash(
+        `Sale completed · ${formatMoney(res.sale.total ?? quotationMode.total)} · ${payment}`,
+      );
+      if (printAfterComplete) {
+        void printSaleReceipt(res.sale.id, defaultFormat, { reprint: false }).catch(() => {});
+      }
+      const customerId = res.sale.customerId;
+      setQuotationMode(null);
+      setCustomerName("");
+      setPhone("");
+      setEmail("");
+      router.push(customerId ? `/customers?customerId=${customerId}` : "/customers");
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "Could not complete sale", 6000, "err");
+    } finally {
+      setCompletingQuotation(false);
+    }
+  }
+
   const { data: customerFormulas, loading: formulasLoading } = useApiData<
     Formula[]
   >(
@@ -298,7 +388,7 @@ export default function PosPage() {
     () =>
       inventory.filter(
         (p) =>
-          (p.category === "Packaging" || p.category === "Gift Boxes") &&
+          (p.category === "Packaging" || p.category === "Coffret") &&
           p.unit !== "ml" &&
           !/ethanol|fixative/i.test(p.name),
       ),
@@ -363,12 +453,12 @@ export default function PosPage() {
     return inventory.filter((p) => {
       if (p.category === "Packaging") return false;
       if (catalogFilter === "oil" && p.unit !== "ml") return false;
-      if (catalogFilter === "custom" && p.category !== "Customized Perfumes") {
+      if (catalogFilter === "custom" && p.category !== "Remix") {
         return false;
       }
       if (
         catalogFilter === "ready" &&
-        (p.unit === "ml" || p.category === "Customized Perfumes")
+        (p.unit === "ml" || p.category === "Remix")
       ) {
         return false;
       }
@@ -488,7 +578,7 @@ export default function PosPage() {
   }
 
   function addRemix() {
-    const remix = inventory.find((p) => p.category === "Customized Perfumes");
+    const remix = inventory.find((p) => p.category === "Remix");
     if (!remix) return flash("Create a customized perfume product first", 5000, "err");
     const oil = oilProducts.find((p) => p.id === remixOilId);
     if (!oil) {
@@ -514,7 +604,7 @@ export default function PosPage() {
   /** BLD-08: reuse an approved customer formula on the current order.
    * BLD-04: POS only gets redacted formulas (reuseHints) — no full recipe. */
   function applyCustomerFormula(formula: Formula) {
-    const remix = inventory.find((p) => p.category === "Customized Perfumes");
+    const remix = inventory.find((p) => p.category === "Remix");
     if (!remix) {
       return flash("Create a customized perfume product first", 5000, "err");
     }
@@ -591,7 +681,7 @@ export default function PosPage() {
           return;
         }
       }
-      const remix = inventory.find((p) => p.category === "Customized Perfumes");
+      const remix = inventory.find((p) => p.category === "Remix");
       if (!remix) {
         return flash("Create a customized perfume product first", 5000, "err");
       }
@@ -664,7 +754,7 @@ export default function PosPage() {
       flash(`${product.name} is out of stock`, 4000, "err");
       return;
     }
-    if (product.category === "Customized Perfumes") {
+    if (product.category === "Remix") {
       addRemix();
       return;
     }
@@ -927,7 +1017,7 @@ export default function PosPage() {
       id: pid,
       sku: "—",
       name: line.name,
-      category: "Brand Perfumes",
+      category: "Brands",
       unit: line.lineType === "oil" || line.lineType === "refill" ? "ml" : "pcs",
       sellPrice: line.unitPrice,
       minMarginPct: 0,
@@ -1504,7 +1594,7 @@ export default function PosPage() {
                               disabled={out}
                               title={out ? "Out of stock" : undefined}
                               onClick={() =>
-                                p.category === "Customized Perfumes"
+                                p.category === "Remix"
                                   ? addRemix()
                                   : addReady(p)
                               }
@@ -1565,7 +1655,7 @@ export default function PosPage() {
                         disabled={out}
                         title={out ? "Out of stock" : undefined}
                         onClick={() => {
-                          if (p.category === "Customized Perfumes") addRemix();
+                          if (p.category === "Remix") addRemix();
                           else if (p.unit === "ml") addOil(p, "tola");
                           else addReady(p);
                         }}
@@ -1635,13 +1725,27 @@ export default function PosPage() {
           <div className="shrink-0">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <h2 className="font-semibold text-lg text-ink">Current Bill</h2>
+                <h2 className="font-semibold text-lg text-ink">
+                  {quotationMode ? `Converting ${quotationMode.number}` : "Current Bill"}
+                </h2>
                 <p className="text-[11px] text-ink-muted">
-                  {itemCount} items · {heldList.length} held
+                  {quotationMode
+                    ? `${quotationMode.lines.length} items from quotation`
+                    : `${itemCount} items · ${heldList.length} held`}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {salespeople.length > 0 ? (
+                {quotationMode ? (
+                  <button
+                    type="button"
+                    onClick={exitQuotationMode}
+                    title="Exit quotation mode — back to a regular bill"
+                    className="flex h-8 items-center gap-1 rounded-full border border-line bg-mist px-2.5 text-[11px] text-ink-muted hover:border-line-strong"
+                  >
+                    <X className="h-3 w-3" />
+                    Exit
+                  </button>
+                ) : salespeople.length > 0 ? (
                   <select
                     value={salesperson}
                     disabled={switchingSalesperson}
@@ -1656,11 +1760,17 @@ export default function PosPage() {
                     ))}
                   </select>
                 ) : null}
-                <Badge tone={cart.length > 0 ? "success" : "neutral"}>
-                  {cart.length > 0 ? "Live" : "Idle"}
+                <Badge tone={quotationMode ? "gold" : cart.length > 0 ? "success" : "neutral"}>
+                  {quotationMode ? "Quotation" : cart.length > 0 ? "Live" : "Idle"}
                 </Badge>
               </div>
             </div>
+
+            {quotationLoadError ? (
+              <p className="mt-3 rounded-lg border border-coral/30 bg-coral-soft px-3 py-2 text-xs text-coral">
+                {quotationLoadError}
+              </p>
+            ) : null}
 
             {/* Line 1: name */}
             <label className="mt-3 block">
@@ -1671,7 +1781,9 @@ export default function PosPage() {
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Customer name"
-                className="mt-1 h-9 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                readOnly={!!quotationMode}
+                title={quotationMode ? "From the quotation — exit quotation mode to edit" : undefined}
+                className="mt-1 h-9 w-full rounded-full border border-line bg-mist px-3 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 read-only:text-ink-muted"
               />
             </label>
 
@@ -1697,7 +1809,9 @@ export default function PosPage() {
                   }}
                   placeholder="+971 …"
                   inputMode="tel"
-                  className="mt-1 box-border h-9 w-full rounded-full border border-line bg-mist px-3 text-sm leading-normal outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                  readOnly={!!quotationMode}
+                  title={quotationMode ? "From the quotation — exit quotation mode to edit" : undefined}
+                  className="mt-1 box-border h-9 w-full rounded-full border border-line bg-mist px-3 text-sm leading-normal outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 read-only:text-ink-muted"
                 />
               </label>
               <label className="min-w-0 block">
@@ -1709,7 +1823,9 @@ export default function PosPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="email@…"
-                  className="mt-1 box-border h-9 w-full rounded-full border border-line bg-mist px-3 text-sm leading-normal outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+                  readOnly={!!quotationMode}
+                  title={quotationMode ? "From the quotation — exit quotation mode to edit" : undefined}
+                  className="mt-1 box-border h-9 w-full rounded-full border border-line bg-mist px-3 text-sm leading-normal outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 read-only:text-ink-muted"
                 />
               </label>
             </div>
@@ -1856,7 +1972,28 @@ export default function PosPage() {
 
           {/* Only cart scrolls — Complete footer stays pinned */}
           <div className="scrollbar-hidden mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
-            {cart.length === 0 ? (
+            {quotationMode ? (
+              quotationMode.lines.map((line, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg border border-line/70 bg-mist/30 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{line.name}</p>
+                    <p className="text-[11px] text-ink-muted">
+                      {line.unitLabel} · {line.lineType}
+                      {line.formulaName ? ` · ${line.formulaName}` : ""}
+                    </p>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <span className="text-sm font-medium">{line.qty} ×</span>
+                    <p className="text-sm font-semibold">
+                      {formatMoney(line.qty * line.unitPrice)}
+                    </p>
+                  </div>
+                </div>
+              ))
+            ) : cart.length === 0 ? (
               <div className="rounded-lg border border-dashed border-line bg-mist/40 px-3 py-8 text-center text-sm text-ink-muted">
                 Cart is empty — add products or remix
               </div>
@@ -1926,7 +2063,19 @@ export default function PosPage() {
           <div className="shrink-0 border-t border-line/70 pt-3">
             <div className="flex items-end justify-between gap-2">
               <div className="min-w-0 text-[11px] text-ink-muted">
-                {vatPercent > 0 ? (
+                {quotationMode ? (
+                  quotationMode.vatPercent > 0 ? (
+                    <>
+                      <p>
+                        Net {formatMoney(quotationMode.subtotal)} · VAT{" "}
+                        {quotationMode.vatPercent}% {formatMoney(quotationMode.vatAmount)}
+                      </p>
+                      <p className="text-[10px]">Locked to the quotation&apos;s price</p>
+                    </>
+                  ) : (
+                    <p>Subtotal (locked to the quotation&apos;s price)</p>
+                  )
+                ) : vatPercent > 0 ? (
                   <>
                     <p>
                       Net {formatMoney(netAmount)} · VAT {vatPercent}%{" "}
@@ -1941,7 +2090,7 @@ export default function PosPage() {
               <div className="text-right">
                 <p className="text-[11px] text-ink-muted">Total</p>
                 <p className="font-semibold text-xl tabular-nums leading-none">
-                  {formatMoney(subtotal)}
+                  {formatMoney(quotationMode ? quotationMode.total : subtotal)}
                 </p>
               </div>
             </div>
@@ -1964,18 +2113,20 @@ export default function PosPage() {
               ))}
             </div>
 
-            <Button
-              className="mt-2 w-full"
-              variant="secondary"
-              size="sm"
-              disabled={cart.length === 0 || holding || checkingOut}
-              onClick={() => void holdBill()}
-            >
-              <Pause className="h-3.5 w-3.5" />
-              Hold bill
-            </Button>
+            {!quotationMode ? (
+              <Button
+                className="mt-2 w-full"
+                variant="secondary"
+                size="sm"
+                disabled={cart.length === 0 || holding || checkingOut}
+                onClick={() => void holdBill()}
+              >
+                <Pause className="h-3.5 w-3.5" />
+                Hold bill
+              </Button>
+            ) : null}
 
-            {cart.length > 0 ? (
+            {!quotationMode && cart.length > 0 ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <Button
                   variant="secondary"
@@ -2025,17 +2176,25 @@ export default function PosPage() {
             <Button
               className="mt-2 w-full"
               variant="gold"
-              disabled={cart.length === 0 || checkingOut || holding}
-              onClick={checkout}
+              disabled={
+                quotationMode
+                  ? completingQuotation
+                  : cart.length === 0 || checkingOut || holding
+              }
+              onClick={() => void (quotationMode ? completeQuotationSale() : checkout())}
             >
-              {`Complete Sale · ${formatMoney(subtotal)}`}
+              {completingQuotation
+                ? "Completing…"
+                : `Complete Sale · ${formatMoney(quotationMode ? quotationMode.total : subtotal)}`}
             </Button>
-            <p className="mt-1 text-center text-[10px] text-ink-muted">
-              Shortcut · F9
-            </p>
+            {!quotationMode ? (
+              <p className="mt-1 text-center text-[10px] text-ink-muted">
+                Shortcut · F9
+              </p>
+            ) : null}
 
             {/* Held bills dropdown — below Complete */}
-            {heldList.length > 0 ? (
+            {!quotationMode && heldList.length > 0 ? (
               <div className="relative mt-2">
                 <button
                   type="button"

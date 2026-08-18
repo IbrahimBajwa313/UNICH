@@ -38,21 +38,15 @@ export type AuthMe = {
 };
 
 export type ProductCategory =
-  | "Brand Perfumes"
-  | "Signature Brand"
-  | "Customized Perfumes"
-  | "Perfume Oils"
-  | "Oud Oils"
-  | "Itar"
+  | "Brands"
+  | "Remix"
   | "Body Mist"
-  | "Roll-ons"
-  | "Deodorants"
+  | "Body Spray"
+  | "Coffret"
   | "Bakhoor"
-  | "Incense Burners"
-  | "Gift Boxes"
-  | "Perfume Sets"
   | "Single Notes"
-  | "Mass Perfumes"
+  | "Signature Brand"
+  | "Niche Brand"
   | "Packaging";
 
 export type StockUnit = "pcs" | "ml" | "g" | "kg";

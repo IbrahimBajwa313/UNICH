@@ -70,8 +70,8 @@ export function buildTemplateWorkbook(): Buffer {
     ["1. Fill the Products sheet — one product per row."],
     ["2. Leave Internal Code blank to CREATE; fill SKU to UPDATE."],
     ["3. Use Lists sheet values for Category, Concentration, Unit, Item Type."],
-    ["4. Oils (Perfume Oils, Oud Oils, Single Notes, Itar) must use Unit = ml; Size multiples of 5."],
-    ["5. Brand / Packaging categories should use Unit = pcs."],
+    ["4. Single Notes (raw perfume/oud/itar oils) must use Unit = ml; Size multiples of 5."],
+    ["5. Brands / Signature Brand / Niche Brand / Coffret / Packaging should use Unit = pcs."],
     ["6. Retail Price must respect price floor vs Cost (admin password can override on commit)."],
     ["7. Upload via Inventory → Import Excel for staging preview before commit."],
   ]);

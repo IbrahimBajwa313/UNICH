@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/auth/apiGuard";
 import { connectDB } from "@/lib/db";
 
 export async function GET() {
@@ -9,7 +10,7 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Connection failed",
+        error: safeErrorMessage(error, "Connection failed"),
       },
       { status: 500 },
     );

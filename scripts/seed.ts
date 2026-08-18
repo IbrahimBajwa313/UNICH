@@ -26,6 +26,7 @@ import {
 } from "../src/lib/models";
 import { hashPassword } from "../src/lib/auth/password";
 import { ROLE_LABELS } from "../src/lib/auth/roles";
+import { computeQuotationTotals } from "../src/lib/quotation/calc";
 
 async function clearAll() {
   await Promise.all([
@@ -55,7 +56,7 @@ async function seed() {
       sku: "BP-001",
       name: "Aventus Inspired",
       nameAr: "أفينتوس",
-      category: "Brand Perfumes",
+      category: "Brands",
       unit: "pcs",
       sellPrice: 280,
       minMarginPct: 25,
@@ -89,7 +90,7 @@ async function seed() {
       sku: "PO-012",
       name: "Oud Cambodi Oil",
       nameAr: "عود كمبودي",
-      category: "Oud Oils",
+      category: "Single Notes",
       unit: "ml",
       sellPrice: 18.5,
       minMarginPct: 40,
@@ -121,7 +122,7 @@ async function seed() {
     {
       sku: "RM-STD",
       name: "Remix 100ml Standard",
-      category: "Customized Perfumes",
+      category: "Remix",
       unit: "pcs",
       sellPrice: 150,
       minMarginPct: 45,
@@ -527,7 +528,7 @@ async function seed() {
     {
       sku: "PO-001",
       name: "White Musk Oil",
-      category: "Perfume Oils",
+      category: "Single Notes",
       unit: "ml",
       sellPrice: 6.5,
       minMarginPct: 40,
@@ -542,7 +543,7 @@ async function seed() {
     {
       sku: "GB-001",
       name: "Gift Box — Duo",
-      category: "Gift Boxes",
+      category: "Coffret",
       unit: "pcs",
       sellPrice: 45,
       minMarginPct: 25,
@@ -995,13 +996,98 @@ async function seed() {
     },
   ]);
 
-  await Quotation.insertMany([
-    { number: "QT-2026-018", customerName: "Noor Trading LLC", customerPhone: "+971 4 330 8899", status: "sent", date: new Date("2026-07-24"), expiry: new Date("2026-08-07"), total: 8600, items: 24 },
-    { number: "QT-2026-019", customerName: "Omar Hassan", customerPhone: "+971 55 987 1122", status: "draft", date: new Date("2026-07-27"), expiry: new Date("2026-08-10"), total: 420, items: 3 },
-    { number: "QT-2026-015", customerName: "Al Manara Gifts", customerPhone: "+971 50 666 2211", status: "approved", date: new Date("2026-07-12"), expiry: new Date("2026-07-26"), total: 12400, items: 40 },
-    { number: "QT-2026-011", customerName: "Boutique Luxe", customerPhone: "+971 4 991 3344", status: "expired", date: new Date("2026-06-20"), expiry: new Date("2026-07-04"), total: 5100, items: 15 },
-    { number: "QT-2026-017", customerName: "Fatima Al Mazrouei", customerPhone: "+971 50 123 4567", status: "revised", date: new Date("2026-07-22"), expiry: new Date("2026-08-05"), total: 780, items: 4 },
-  ]);
+  const qline = (
+    product: { _id: unknown; name: string; unit: string },
+    qty: number,
+    unitPrice: number,
+    lineType: "ready" | "remix" | "oil" | "refill" | "packaging" | "wholesale",
+  ) => ({
+    productId: product._id,
+    name: product.name,
+    qty,
+    unitLabel: product.unit,
+    unitPrice,
+    lineType,
+  });
+
+  const quotationSeed = [
+    {
+      number: "QT-2026-018",
+      customerName: "Noor Trading LLC",
+      customerPhone: "+971 4 330 8899",
+      status: "sent",
+      date: new Date("2026-07-24"),
+      expiry: new Date("2026-08-07"),
+      lines: [
+        qline(bySku["SG-001"], 20, 320, "wholesale"),
+        qline(bySku["BP-001"], 8, 275, "wholesale"),
+      ],
+    },
+    {
+      number: "QT-2026-019",
+      customerName: "Omar Hassan",
+      customerPhone: "+971 55 987 1122",
+      status: "draft",
+      date: new Date("2026-07-27"),
+      expiry: new Date("2026-08-10"),
+      lines: [qline(bySku["RM-STD"], 3, 140, "remix")],
+    },
+    {
+      number: "QT-2026-015",
+      customerName: "Al Manara Gifts",
+      customerPhone: "+971 50 666 2211",
+      status: "approved",
+      date: new Date("2026-07-12"),
+      expiry: new Date("2026-07-26"),
+      lines: [
+        qline(bySku["SG-001"], 30, 320, "wholesale"),
+        qline(bySku["BP-001"], 10, 280, "wholesale"),
+      ],
+    },
+    {
+      number: "QT-2026-011",
+      customerName: "Boutique Luxe",
+      customerPhone: "+971 4 991 3344",
+      status: "expired",
+      date: new Date("2026-06-20"),
+      expiry: new Date("2026-07-04"),
+      lines: [qline(bySku["BP-001"], 15, 340, "wholesale")],
+    },
+    {
+      number: "QT-2026-017",
+      customerName: "Fatima Al Mazrouei",
+      customerPhone: "+971 50 123 4567",
+      status: "revised",
+      date: new Date("2026-07-22"),
+      expiry: new Date("2026-08-05"),
+      lines: [qline(bySku["RM-STD"], 4, 195, "remix")],
+    },
+  ];
+
+  await Quotation.insertMany(
+    quotationSeed.map((q) => {
+      const vatPercent = 0;
+      const { subtotal, vatAmount, total } = computeQuotationTotals(q.lines, vatPercent);
+      return {
+        ...q,
+        lines: q.lines,
+        subtotal,
+        vatPercent,
+        vatAmount,
+        total,
+        version: 1,
+        history: [
+          {
+            at: q.date,
+            by: "System",
+            action: "created",
+            toStatus: "draft",
+            toVersion: 1,
+          },
+        ],
+      };
+    }),
+  );
 
   const now = new Date();
   const day = (offset: number, hour: number, minute: number) => {

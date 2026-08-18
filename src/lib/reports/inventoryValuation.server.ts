@@ -36,34 +36,8 @@ export function buildInventoryValuationExcel(
   report: InventoryValuationReport,
 ): Buffer {
   const wb = XLSX.utils.book_new();
-  const bucketLabel =
-    report.filters.bucket === "all"
-      ? "All buckets"
-      : report.filters.bucket.charAt(0).toUpperCase() +
-        report.filters.bucket.slice(1);
-
-  const productLabel = report.filters.productId
-    ? report.categories
-        .flatMap((c) => c.products)
-        .find((p) => p.id === report.filters.productId)?.name ??
-      report.filters.productId
-    : "All";
 
   const summaryRows: (string | number)[][] = [
-    ["Report", "Category-wise Inventory Valuation"],
-    ["Generated", report.generatedAt],
-    ["Bucket", bucketLabel],
-    ["Category filter", report.filters.category || "All"],
-    ["Brand filter", report.filters.brand || "All"],
-    ["Product filter", productLabel],
-    ["Total FIFO value", report.totalValue],
-    ["SKUs", report.totalSkus],
-    ["Categories", report.categoryCount],
-    ["Highest category", report.highest?.category ?? "—"],
-    ["Highest value", report.highest?.value ?? 0],
-    ["Lowest category", report.lowest?.category ?? "—"],
-    ["Lowest value", report.lowest?.value ?? 0],
-    [],
     ["Category", "SKUs", "Qty", "Inventory Value", "% of Total"],
     ...report.categories.map((c) => [
       c.category,
@@ -121,6 +95,18 @@ export function buildInventoryValuationExcel(
     { wch: 14 },
     { wch: 14 },
   ];
+  summarySheet["!autofilter"] = {
+    ref: XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: summaryRows.length - 1, c: summaryRows[0].length - 1 },
+    }),
+  };
+  detailSheet["!autofilter"] = {
+    ref: XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: detailRows.length - 1, c: detailRows[0].length - 1 },
+    }),
+  };
 
   XLSX.utils.book_append_sheet(wb, summarySheet, "Category Summary");
   XLSX.utils.book_append_sheet(wb, detailSheet, "Product Detail");

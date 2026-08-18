@@ -5,7 +5,7 @@ import { computeQuotationTotals } from "@/lib/quotation/calc";
 import { normalizeQuotationLines } from "@/lib/quotation/lines";
 import { loadQuotationSettings } from "@/lib/quotation/server";
 import { toJSON, toJSONList } from "@/lib/serialize";
-import { isAuthResponse, requireApiAccess } from "@/lib/auth/apiGuard";
+import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { escapeRegex, loosePhoneRegex, phoneDigits } from "@/lib/phone";
 
 function mapQuote(q: Record<string, unknown>) {
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     return NextResponse.json(toJSONList(quotations).map(mapQuote));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load quotations" },
+      { error: safeErrorMessage(error, "Failed to load quotations") },
       { status: 500 },
     );
   }
@@ -62,11 +62,20 @@ export async function POST(req: Request) {
     const vatPercent = Number(body.vatPercent ?? settings.vatPercent ?? 0);
     const { subtotal, vatAmount, total } = computeQuotationTotals(lines, vatPercent);
 
-    const count = await Quotation.countDocuments();
     const prefix = (body.number ? "" : settings.quotationNumberPrefix) || "QT";
-    const number =
-      body.number ||
-      `${prefix}-${new Date().getFullYear()}-${String(count + 1).padStart(3, "0")}`;
+    const year = new Date().getFullYear();
+
+    async function nextQuotationNumber(): Promise<string> {
+      const seriesPrefix = `${prefix}-${year}-`;
+      const last = await Quotation.findOne({
+        number: { $regex: `^${seriesPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\d+$` },
+      })
+        .sort({ number: -1 })
+        .select("number")
+        .lean<{ number: string }>();
+      const lastSeq = last ? parseInt(last.number.slice(seriesPrefix.length), 10) || 0 : 0;
+      return `${seriesPrefix}${String(lastSeq + 1).padStart(3, "0")}`;
+    }
 
     const validityDays = Number(body.validityDays ?? settings.quotationDefaultValidityDays ?? 14);
     const date = new Date(body.date || Date.now());
@@ -74,8 +83,7 @@ export async function POST(req: Request) {
       ? new Date(body.expiry)
       : new Date(date.getTime() + validityDays * 24 * 60 * 60 * 1000);
 
-    const quotation = await Quotation.create({
-      number,
+    const baseDoc = {
       customerId: body.customerId || undefined,
       customerName: body.customerName,
       customerPhone: body.customerPhone,
@@ -100,7 +108,7 @@ export async function POST(req: Request) {
       signatureDataUrl: body.signatureDataUrl || "",
       signedByName: body.signatureDataUrl ? body.signedByName || body.customerName : "",
       signedAt: body.signatureDataUrl ? new Date() : undefined,
-      status: "draft",
+      status: "draft" as const,
       version: 1,
       history: [
         {
@@ -113,11 +121,26 @@ export async function POST(req: Request) {
       ],
       branchId: access?.branchId ?? undefined,
       branchName: access?.branchName ?? undefined,
-    });
+    };
+
+    // Retry on unique-index collisions from concurrent requests racing for the same number.
+    let quotation;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const number = body.number || (await nextQuotationNumber());
+      try {
+        quotation = await Quotation.create({ ...baseDoc, number });
+        break;
+      } catch (error) {
+        const isDupNumber =
+          (error as { code?: number })?.code === 11000 &&
+          /number_1/.test((error as { message?: string })?.message || "");
+        if (body.number || !isDupNumber || attempt === 4) throw error;
+      }
+    }
     return NextResponse.json(mapQuote(toJSON(quotation)!), { status: 201 });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create quotation" },
+      { error: safeErrorMessage(error, "Failed to create quotation") },
       { status: 400 },
     );
   }
