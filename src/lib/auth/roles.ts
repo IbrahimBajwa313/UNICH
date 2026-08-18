@@ -69,6 +69,7 @@ const ACCOUNTANT_PERMS: Permission[] = [
   "reports:read",
   "expenses:read",
   "expenses:write",
+  "purchases:read",
 ];
 
 /** PUR-04: purchase creation/receipt is owner/manager only — Inventory may view but not commit spend. */

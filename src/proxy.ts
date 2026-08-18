@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { SESSION_COOKIE, parseSessionToken } from "@/lib/auth/session";
+import { hasPermission, permissionForPath } from "@/lib/auth/roles";
 import { applyCorsHeaders, corsPreflightResponse } from "@/lib/cors";
 
 /**
- * Optimistic route gate (Next.js 16 proxy).
- * Authoritative checks live in API handlers via requireApiAccess / requirePermission.
- * CORS for /api/* is applied here so preflight + credentialed clients work.
+ * Route gate (Next.js 16 proxy) — Node runtime by default, so this now
+ * enforces per-role page permission server-side (not just session presence),
+ * so a page a role can't open is never rendered even for a moment.
+ * Authoritative checks for data still live in API handlers via
+ * requireApiAccess / requirePermission — this only protects page HTML.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -68,6 +71,20 @@ export function proxy(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("from", pathname);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // App pages only (not API): block pages the role has no permission for,
+  // so restricted pages never render even briefly before a client redirect.
+  if (!isApi) {
+    const session = parseSessionToken(
+      request.cookies.get(SESSION_COOKIE)?.value,
+    );
+    if (session) {
+      const perm = permissionForPath(pathname);
+      if (perm && !hasPermission(session.role, perm)) {
+        return NextResponse.redirect(new URL("/", request.url));
+      }
+    }
   }
 
   return withCors(NextResponse.next());

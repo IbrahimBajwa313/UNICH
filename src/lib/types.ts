@@ -534,7 +534,7 @@ export interface SaleLine {
 
 export interface DashboardAlert {
   id: string;
-  type: "low_stock" | "dead_stock" | "transfer" | "report";
+  type: "low_stock" | "dead_stock" | "transfer" | "report" | "receivables" | "payables";
   title: string;
   detail: string;
   severity: "info" | "warning" | "critical";
@@ -549,19 +549,54 @@ export interface SalesPoint {
 
 export interface DashboardData {
   stats: {
-    todaySales: number;
-    grossMarginPct: number;
-    remixSales: number;
-    lowStockCount: number;
-    fifoValue: number;
-    weekTotal: number;
-    todayExpenseTotal: number;
-    productCount: number;
+    /** requires pos:read */
+    todaySales?: number;
+    /** requires reports:read */
+    grossMarginPct?: number;
+    /** requires reports:read */
+    grossMarginTrendPts?: number;
+    /** requires pos:read */
+    remixSales?: number;
+    /** requires inventory:read */
+    lowStockCount?: number;
+    /** requires inventory:read */
+    fifoValue?: number;
+    /** requires reports:read */
+    weekTotal?: number;
+    /** requires expenses:read */
+    todayExpenseTotal?: number;
+    /** requires inventory:read */
+    productCount?: number;
+    /** requires expenses:read */
+    monthExpenseTotal?: number;
+    /** requires expenses:read */
+    grossProfit?: number;
+    /** requires expenses:read */
+    netProfit?: number;
+    /** requires expenses:read */
+    netProfitMarginPct?: number;
+    /** requires expenses:read */
+    netMarginTrendPts?: number;
+    /** requires expenses:read */
+    accountsReceivable?: number;
+    /** requires expenses:read */
+    accountsPayable?: number;
+    /** requires expenses:read */
+    netCash?: number;
   };
-  salesTrend: SalesPoint[];
+  /** requires pos:read */
+  salesTrend?: SalesPoint[];
   alerts: DashboardAlert[];
-  recentSales: { id: string; time: string; customer: string; type: string; total: number; payment: string }[];
-  lowStock: { id: string; name: string; stockSellable: number; lowStockAt: number; unit: StockUnit }[];
+  /** requires pos:read */
+  recentSales?: { id: string; time: string; customer: string; type: string; total: number; payment: string }[];
+  /** requires inventory:read */
+  lowStock?: { id: string; name: string; stockSellable: number; lowStockAt: number; unit: StockUnit }[];
+  /** requires expenses:read */
+  expenseByCategory?: { category: string; amount: number }[];
+  /** requires expenses:read */
+  topReceivables?: { id: string; name: string; balance: number }[];
+  /** requires expenses:read */
+  topPayables?: { id: string; name: string; balance: number }[];
   moduleRoadmap: { name: string; status: string; priority: number }[];
 }
 
