@@ -113,6 +113,18 @@ export function QuotationEditor({
   const [signedByName, setSignedByName] = useState(quotation?.signedByName || "");
   const sigRef = useRef<SignaturePadHandle>(null);
 
+  const [showCustomerDetails, setShowCustomerDetails] = useState(
+    Boolean(quotation?.customerTrn || quotation?.customerAddress || quotation?.customerPoNumber),
+  );
+  const [showMoreOptions, setShowMoreOptions] = useState(
+    Boolean(
+      quotation?.paymentTerms ||
+        quotation?.deliveryTerms ||
+        quotation?.notes ||
+        quotation?.attachments?.length,
+    ),
+  );
+
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -301,7 +313,7 @@ export function QuotationEditor({
     <Panel className="mt-5">
       <PanelHeader
         title={mode === "new" ? "New Quotation" : mode === "revise" ? "Revise Quotation" : "Edit Quotation"}
-        subtitle="Full line items, VAT, terms, attachments — converts straight to a sale once approved."
+        subtitle="Add the customer and products, then save. Payment terms, VAT, notes and attachments are optional extras."
       />
 
       {error ? (
@@ -340,10 +352,23 @@ export function QuotationEditor({
 
         <Field label="Customer name" value={customerName} onChange={setCustomerName} />
         <Field label="Customer phone" value={customerPhone} onChange={setCustomerPhone} />
-        <Field label="Customer email" value={customerEmail} onChange={setCustomerEmail} />
-        <Field label="Customer TRN (optional)" value={customerTrn} onChange={setCustomerTrn} />
-        <Field label="Customer address" value={customerAddress} onChange={setCustomerAddress} />
-        <Field label="Customer PO / LPO number" value={customerPoNumber} onChange={setCustomerPoNumber} />
+
+        {showCustomerDetails ? (
+          <>
+            <Field label="Customer email" value={customerEmail} onChange={setCustomerEmail} />
+            <Field label="Customer TRN (optional)" value={customerTrn} onChange={setCustomerTrn} />
+            <Field label="Customer address" value={customerAddress} onChange={setCustomerAddress} />
+            <Field label="Customer PO / LPO number" value={customerPoNumber} onChange={setCustomerPoNumber} />
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowCustomerDetails(true)}
+            className="sm:col-span-2 text-left text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
+          >
+            + Add email, TRN, address or PO number
+          </button>
+        )}
       </div>
 
       <div className="mt-5 space-y-2">
@@ -462,108 +487,122 @@ export function QuotationEditor({
         ))}
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <label className="text-xs text-ink-muted">
-          Payment terms
-          <select
-            value={paymentTerms}
-            onChange={(e) => setPaymentTerms(e.target.value)}
-            className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"
+      <div className="mt-5">
+        {showMoreOptions ? (
+          <button
+            type="button"
+            onClick={() => setShowMoreOptions(false)}
+            className="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
           >
-            <option value="">Select preset (or type below)</option>
-            {settings.quotationPaymentTermsPresets.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <input
-            value={paymentTerms}
-            onChange={(e) => setPaymentTerms(e.target.value)}
-            className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm"
-          />
-        </label>
-        <label className="text-xs text-ink-muted">
-          Delivery terms
-          <select
-            value={deliveryTerms}
-            onChange={(e) => setDeliveryTerms(e.target.value)}
-            className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"
+            − Hide payment terms, VAT, notes &amp; attachments
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowMoreOptions(true)}
+            className="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
           >
-            <option value="">Select preset (or type below)</option>
-            {settings.quotationDeliveryTermsPresets.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <input
-            value={deliveryTerms}
-            onChange={(e) => setDeliveryTerms(e.target.value)}
-            className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm"
-          />
-        </label>
-        <Field label="Validity (days)" value={validityDays} onChange={setValidityDays} />
-        <Field label="VAT %" value={vatPercent} onChange={setVatPercent} />
+            + Payment terms, VAT, notes &amp; attachments (using defaults)
+          </button>
+        )}
       </div>
 
-      <label className="mt-3 block text-xs text-ink-muted">
-        Terms &amp; conditions
-        <textarea
-          value={termsText}
-          onChange={(e) => setTermsText(e.target.value)}
-          rows={3}
-          className="mt-1 w-full rounded border border-line bg-mist px-2 py-1.5 text-sm"
-        />
-      </label>
-      <label className="mt-3 block text-xs text-ink-muted">
-        Notes
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={2}
-          className="mt-1 w-full rounded border border-line bg-mist px-2 py-1.5 text-sm"
-        />
-      </label>
-
-      <div className="mt-4">
-        <p className="mb-1 text-xs font-medium uppercase tracking-wider text-ink-muted">
-          Attachments (customer LPO/PO copy, etc.)
-        </p>
-        <input type="file" multiple onChange={(e) => addAttachment(e.target.files)} className="text-sm" />
-        {attachments.length > 0 ? (
-          <ul className="mt-2 space-y-1">
-            {attachments.map((a) => (
-              <li key={a.name} className="flex items-center justify-between rounded border border-line/60 bg-mist/40 px-2 py-1 text-xs">
-                <span>{a.name}</span>
-                <button type="button" onClick={() => removeAttachment(a.name)} className="text-coral">
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-
-      <div className="mt-4">
-        <label className="flex items-center gap-2 text-xs text-ink-muted">
-          <input
-            type="checkbox"
-            checked={captureSignature}
-            onChange={(e) => setCaptureSignature(e.target.checked)}
-          />
-          Capture customer signature now (e.g. signed in-store)
-        </label>
-        {captureSignature ? (
-          <div className="mt-2 space-y-2">
-            <Field label="Signed by" value={signedByName} onChange={setSignedByName} />
-            <SignaturePad ref={sigRef} className="h-32 w-full rounded border border-line bg-white" />
-            <Button variant="secondary" size="sm" onClick={() => sigRef.current?.clear()}>
-              Clear signature
-            </Button>
+      {showMoreOptions ? (
+        <>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-ink-muted">
+              Payment terms
+              <input
+                value={paymentTerms}
+                onChange={(e) => setPaymentTerms(e.target.value)}
+                list="payment-terms-presets"
+                placeholder="e.g. 50% advance, balance on delivery"
+                className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm"
+              />
+              <datalist id="payment-terms-presets">
+                {settings.quotationPaymentTermsPresets.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            </label>
+            <label className="text-xs text-ink-muted">
+              Delivery terms
+              <input
+                value={deliveryTerms}
+                onChange={(e) => setDeliveryTerms(e.target.value)}
+                list="delivery-terms-presets"
+                placeholder="e.g. 3–5 working days"
+                className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm"
+              />
+              <datalist id="delivery-terms-presets">
+                {settings.quotationDeliveryTermsPresets.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            </label>
+            <Field label="Validity (days)" value={validityDays} onChange={setValidityDays} />
+            <Field label="VAT %" value={vatPercent} onChange={setVatPercent} />
           </div>
-        ) : null}
-      </div>
+
+          <label className="mt-3 block text-xs text-ink-muted">
+            Terms &amp; conditions
+            <textarea
+              value={termsText}
+              onChange={(e) => setTermsText(e.target.value)}
+              rows={3}
+              className="mt-1 w-full rounded border border-line bg-mist px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="mt-3 block text-xs text-ink-muted">
+            Notes
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded border border-line bg-mist px-2 py-1.5 text-sm"
+            />
+          </label>
+
+          <div className="mt-4">
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-ink-muted">
+              Attachments (customer LPO/PO copy, etc.)
+            </p>
+            <input type="file" multiple onChange={(e) => addAttachment(e.target.files)} className="text-sm" />
+            {attachments.length > 0 ? (
+              <ul className="mt-2 space-y-1">
+                {attachments.map((a) => (
+                  <li key={a.name} className="flex items-center justify-between rounded border border-line/60 bg-mist/40 px-2 py-1 text-xs">
+                    <span>{a.name}</span>
+                    <button type="button" onClick={() => removeAttachment(a.name)} className="text-coral">
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
+          <div className="mt-4">
+            <label className="flex items-center gap-2 text-xs text-ink-muted">
+              <input
+                type="checkbox"
+                checked={captureSignature}
+                onChange={(e) => setCaptureSignature(e.target.checked)}
+              />
+              Capture customer signature now (e.g. signed in-store)
+            </label>
+            {captureSignature ? (
+              <div className="mt-2 space-y-2">
+                <Field label="Signed by" value={signedByName} onChange={setSignedByName} />
+                <SignaturePad ref={sigRef} className="h-32 w-full rounded border border-line bg-white" />
+                <Button variant="secondary" size="sm" onClick={() => sigRef.current?.clear()}>
+                  Clear signature
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </>
+      ) : null}
 
       <div className="mt-5 flex items-center justify-between rounded border border-line/60 bg-mist/40 px-3 py-2 text-sm">
         <span className="text-ink-muted">

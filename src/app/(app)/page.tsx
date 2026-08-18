@@ -9,7 +9,12 @@ import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState"
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ProgressRing } from "@/components/ui/ProgressRing";
+import { LowStockWatchlist } from "@/components/dashboard/LowStockWatchlist";
+import { PaymentMixChart } from "@/components/dashboard/PaymentMixChart";
 import { SalesMixChart } from "@/components/dashboard/SalesMixChart";
+import { StockByCategoryChart } from "@/components/dashboard/StockByCategoryChart";
+import { StockHealthChart } from "@/components/dashboard/StockHealthChart";
+import { TopProductsChart } from "@/components/dashboard/TopProductsChart";
 import { Stat } from "@/components/ui/Stat";
 import { formatMoney } from "@/lib/format";
 import type { DashboardData } from "@/lib/types";
@@ -28,6 +33,11 @@ export default function DashboardPage() {
     expenseByCategory = [],
     topReceivables = [],
     topPayables = [],
+    lowStock = [],
+    stockByCategory = [],
+    stockHealth = { healthy: 0, low: 0, out: 0 },
+    paymentMix = [],
+    topProductsToday = [],
   } = data;
 
   // Widgets are hidden per-role even though the API already omits data the
@@ -84,6 +94,20 @@ export default function DashboardPage() {
             value={String(stats.remixSales ?? 0)}
             hint="auto BOM deducted"
             delay="stagger-3"
+          />
+        )}
+        {canPos && (
+          <Stat
+            label="Transactions Today"
+            value={String(stats.transactionsToday ?? 0)}
+            hint="completed sales"
+          />
+        )}
+        {canPos && (
+          <Stat
+            label="Avg. Sale Value"
+            value={formatMoney(stats.avgSaleValue ?? 0)}
+            hint="per transaction today"
           />
         )}
         {canInventory && (
@@ -176,7 +200,23 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className={`mt-6 grid gap-6 ${canPos ? "xl:grid-cols-3" : ""}`}>
+      {canInventory && (
+        <div className="mt-6 grid gap-6 xl:grid-cols-3">
+          <Panel className="animate-fade-up xl:col-span-2">
+            <PanelHeader
+              title="Stock Value by Category"
+              subtitle="FIFO cost × sellable quantity"
+            />
+            <StockByCategoryChart data={stockByCategory} />
+          </Panel>
+          <Panel className="animate-fade-up">
+            <PanelHeader title="Stock Health" subtitle="Sellable stock vs. reorder threshold" />
+            <StockHealthChart data={stockHealth} />
+          </Panel>
+        </div>
+      )}
+
+      <div className={`mt-6 grid gap-6 ${canPos || canInventory ? "xl:grid-cols-3" : ""}`}>
         {canPos && (
           <Panel className="animate-fade-up xl:col-span-2">
             <PanelHeader
@@ -185,6 +225,21 @@ export default function DashboardPage() {
               action={<Badge tone="info">Live</Badge>}
             />
             <SalesMixChart data={salesTrend} />
+          </Panel>
+        )}
+
+        {!canPos && canInventory && (
+          <Panel className="animate-fade-up xl:col-span-2">
+            <PanelHeader
+              title="Low Stock Watchlist"
+              subtitle="Most urgent reorders first"
+              action={
+                <Link href="/inventory/low-stock" className="text-xs font-medium text-gold-deep hover:underline">
+                  View all →
+                </Link>
+              }
+            />
+            <LowStockWatchlist items={lowStock} />
           </Panel>
         )}
 
@@ -210,6 +265,11 @@ export default function DashboardPage() {
             }
           />
           <ul className="space-y-3">
+            {alerts.length === 0 && (
+              <li className="rounded-2xl border border-line/70 bg-mist/60 px-3 py-4 text-center text-sm text-ink-muted">
+                No alerts right now — all clear.
+              </li>
+            )}
             {alerts.map((alert) => (
               <li
                 key={alert.id}
@@ -235,6 +295,19 @@ export default function DashboardPage() {
           </ul>
         </Panel>
       </div>
+
+      {canPos && (
+        <div className="mt-6 grid gap-6 xl:grid-cols-3">
+          <Panel className="animate-fade-up xl:col-span-2">
+            <PanelHeader title="Top Sellers Today" subtitle="By revenue, this branch" />
+            <TopProductsChart data={topProductsToday} />
+          </Panel>
+          <Panel className="animate-fade-up">
+            <PanelHeader title="Payment Mix" subtitle="How today was paid" />
+            <PaymentMixChart data={paymentMix} />
+          </Panel>
+        </div>
+      )}
 
       {canExpenses && (
         <div className="mt-6 grid gap-6 lg:grid-cols-3">

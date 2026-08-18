@@ -44,6 +44,50 @@ export async function GET(req: Request) {
 
     const todayTotal = todaySales.reduce((s, x) => s + x.total, 0);
     const remixCount = todaySales.filter((s) => s.saleType === "Remix").length;
+    const transactionsToday = todaySales.length;
+    const avgSaleValue =
+      transactionsToday > 0
+        ? Math.round((todayTotal / transactionsToday) * 100) / 100
+        : 0;
+
+    // POS dashboard charts — how today's till is being paid, and what's
+    // actually moving off the shelf, at the front desk / cashier level.
+    const paymentTotals = new Map<string, { amount: number; count: number }>();
+    const productTotals = new Map<string, { qty: number; revenue: number; unit: string }>();
+    for (const sale of todaySales) {
+      const payEntry = paymentTotals.get(sale.payment) || { amount: 0, count: 0 };
+      payEntry.amount += sale.total;
+      payEntry.count += 1;
+      paymentTotals.set(sale.payment, payEntry);
+
+      for (const line of sale.lines || []) {
+        const key = line.name;
+        const prodEntry = productTotals.get(key) || {
+          qty: 0,
+          revenue: 0,
+          unit: line.unitLabel || "",
+        };
+        prodEntry.qty += line.qty;
+        prodEntry.revenue += line.qty * line.unitPrice;
+        productTotals.set(key, prodEntry);
+      }
+    }
+    const paymentMix = Array.from(paymentTotals.entries())
+      .map(([method, { amount, count }]) => ({
+        method: method.charAt(0).toUpperCase() + method.slice(1),
+        amount: Math.round(amount * 100) / 100,
+        count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+    const topProductsToday = Array.from(productTotals.entries())
+      .map(([name, { qty, revenue, unit }]) => ({
+        name,
+        qty: Math.round(qty * 1000) / 1000,
+        unit,
+        revenue: Math.round(revenue * 100) / 100,
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 6);
 
     const products = await Product.find();
     const fifoValue = products.reduce(
@@ -53,6 +97,51 @@ export async function GET(req: Request) {
     const lowStock = products.filter(
       (p) => p.lowStockAt > 0 && p.stockSellable <= p.lowStockAt,
     );
+
+    // Inventory dashboard charts — stock value grouped by category (folded to
+    // "Other" past the top N so the bar chart stays readable) and a
+    // healthy/low/out split for the stock-health donut.
+    const categoryTotals = new Map<string, { value: number; count: number }>();
+    for (const p of products) {
+      const entry = categoryTotals.get(p.category) || { value: 0, count: 0 };
+      entry.value += p.stockSellable * p.costFifo;
+      entry.count += 1;
+      categoryTotals.set(p.category, entry);
+    }
+    const categoryRows = Array.from(categoryTotals.entries())
+      .map(([category, { value, count }]) => ({
+        category,
+        value: Math.round(value * 100) / 100,
+        count,
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    const TOP_CATEGORIES = 6;
+    const stockByCategory =
+      categoryRows.length <= TOP_CATEGORIES
+        ? categoryRows
+        : [
+            ...categoryRows.slice(0, TOP_CATEGORIES - 1),
+            categoryRows.slice(TOP_CATEGORIES - 1).reduce(
+              (acc, row) => ({
+                category: "Other",
+                value: Math.round((acc.value + row.value) * 100) / 100,
+                count: acc.count + row.count,
+              }),
+              { category: "Other", value: 0, count: 0 },
+            ),
+          ];
+
+    const outOfStockCount = products.filter((p) => p.stockSellable === 0).length;
+    const lowNotOutCount = products.filter(
+      (p) =>
+        p.stockSellable > 0 && p.lowStockAt > 0 && p.stockSellable <= p.lowStockAt,
+    ).length;
+    const stockHealth = {
+      healthy: products.length - outOfStockCount - lowNotOutCount,
+      low: lowNotOutCount,
+      out: outOfStockCount,
+    };
 
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 6);
@@ -313,7 +402,12 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       stats: {
-        ...(canPos && { todaySales: todayTotal, remixSales: remixCount }),
+        ...(canPos && {
+          todaySales: todayTotal,
+          remixSales: remixCount,
+          transactionsToday,
+          avgSaleValue,
+        }),
         ...(canReports && { grossMarginPct, grossMarginTrendPts, weekTotal }),
         ...(canInventory && {
           lowStockCount: lowStock.length,
@@ -332,16 +426,20 @@ export async function GET(req: Request) {
           netCash,
         }),
       },
-      ...(canPos && { salesTrend, recentSales }),
+      ...(canPos && { salesTrend, recentSales, paymentMix, topProductsToday }),
       alerts,
       ...(canInventory && {
-        lowStock: lowStock.map((p) => ({
-          id: String(p._id),
-          name: p.name,
-          stockSellable: p.stockSellable,
-          lowStockAt: p.lowStockAt,
-          unit: p.unit,
-        })),
+        lowStock: [...lowStock]
+          .sort((a, b) => a.stockSellable / a.lowStockAt - b.stockSellable / b.lowStockAt)
+          .map((p) => ({
+            id: String(p._id),
+            name: p.name,
+            stockSellable: p.stockSellable,
+            lowStockAt: p.lowStockAt,
+            unit: p.unit,
+          })),
+        stockByCategory,
+        stockHealth,
       }),
       ...(canExpenses && {
         expenseByCategory,

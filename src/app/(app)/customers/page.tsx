@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FileText,
@@ -61,6 +61,18 @@ function CustomersPageInner() {
   const [draft, setDraft] = useState<Partial<Customer> | null>(null);
   const [dupMatch, setDupMatch] = useState<Customer | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const draftFormRef = useRef<HTMLDivElement>(null);
+  const draftOpen = draft !== null;
+
+  // Row click / "Edit Customer" pre-fills the form but it renders below the
+  // profile panel — scroll it into view so the fields are actually visible.
+  useEffect(() => {
+    if (!draftOpen) return;
+    const id = requestAnimationFrame(() => {
+      draftFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [draftOpen]);
 
   // POS "Complete Sale" on a converted quotation hands off here with ?customerId=
   // — just another initial-selection fallback, same role as "first customer".
@@ -190,7 +202,7 @@ function CustomersPageInner() {
               {filtered.map((c) => (
                 <tr
                   key={c.id}
-                  onClick={() => { setSelectedId(c.id); setDraft(null); setDupMatch(null); setFormError(null); }}
+                  onClick={() => { setSelectedId(c.id); setDraft({ ...c }); setDupMatch(null); setFormError(null); }}
                   className={`cursor-pointer border-t border-line/60 hover:bg-mist/40 ${
                     activeId === c.id ? "bg-gold/10" : ""
                   }`}
@@ -399,15 +411,25 @@ function CustomersPageInner() {
           </div>
         </Panel> : <Panel><p className="text-sm text-ink-muted">No customers yet.</p></Panel>}
       </div>
-      {draft ? <Panel className="mt-5"><PanelHeader title={draft.id ? "Edit Customer" : "New Customer"} subtitle="Customer profile data" /><div className="grid gap-3 sm:grid-cols-3">
+      {draft ? <Panel ref={draftFormRef} className="mt-5"><PanelHeader title={draft.id ? "Edit Customer" : "New Customer"} subtitle="Customer profile data" /><div className="grid gap-3 sm:grid-cols-3">
         <CustomerInput label="Name" value={draft.name || ""} onChange={(name) => setDraft({ ...draft, name })} />
         <CustomerInput label="Phone" value={draft.phone || ""} onChange={(phone) => setDraft({ ...draft, phone })} />
         <CustomerInput label="Email" value={draft.email || ""} onChange={(email) => setDraft({ ...draft, email })} />
         <CustomerInput label="Address" value={draft.address || ""} onChange={(address) => setDraft({ ...draft, address })} />
         <CustomerInput label="VAT Number" value={draft.vatNumber || ""} onChange={(vatNumber) => setDraft({ ...draft, vatNumber })} />
       </div>
-      <CustomerInput label="Preferences (comma separated)" value={(draft.preferences || []).join(", ")} onChange={(preferences) => setDraft({ ...draft, preferences: preferences.split(",").map((p) => p.trim()).filter(Boolean) })} />
-      <CustomerInput label="Products Requested (comma separated)" value={(draft.productsRequested || []).join(", ")} onChange={(productsRequested) => setDraft({ ...draft, productsRequested: productsRequested.split(",").map((p) => p.trim()).filter(Boolean) })} />
+      <TagInput
+        label="Preferences"
+        values={draft.preferences || []}
+        onChange={(preferences) => setDraft({ ...draft, preferences })}
+        placeholder="Type a preference and press Enter…"
+      />
+      <TagInput
+        label="Products Requested"
+        values={draft.productsRequested || []}
+        onChange={(productsRequested) => setDraft({ ...draft, productsRequested })}
+        placeholder="Type a product and press Enter…"
+      />
       <CustomerTextarea label="Notes" value={draft.notes || ""} onChange={(notes) => setDraft({ ...draft, notes })} />
 
       {dupMatch ? (
@@ -433,4 +455,66 @@ function CustomerInput({ label, value, onChange }: { label: string; value: strin
 
 function CustomerTextarea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return <label className="mt-3 block text-xs text-ink-muted">{label}<textarea value={value} onChange={(e) => onChange(e.target.value)} rows={2} className="mt-1 w-full rounded border border-line bg-mist px-2 py-1.5 text-sm" /></label>;
+}
+
+/** Chip-style multi-value entry — replaces raw "comma separated" text fields. */
+function TagInput({
+  label,
+  values,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState("");
+
+  function commit(raw: string) {
+    const tag = raw.trim();
+    setText("");
+    if (!tag) return;
+    if (values.some((v) => v.toLowerCase() === tag.toLowerCase())) return;
+    onChange([...values, tag]);
+  }
+
+  return (
+    <label className="mt-3 block text-xs text-ink-muted">
+      {label}
+      <div className="mt-1 flex min-h-9 flex-wrap items-center gap-1.5 rounded border border-line bg-mist px-2 py-1.5 focus-within:border-gold">
+        {values.map((tag) => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-xs font-medium text-gold-soft"
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((v) => v !== tag))}
+              className="text-gold-soft/70 hover:text-gold-soft"
+              aria-label={`Remove ${tag}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              commit(text);
+            } else if (e.key === "Backspace" && text === "" && values.length > 0) {
+              onChange(values.slice(0, -1));
+            }
+          }}
+          onBlur={() => commit(text)}
+          placeholder={values.length === 0 ? placeholder : ""}
+          className="min-w-[120px] flex-1 bg-transparent py-0.5 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+        />
+      </div>
+    </label>
+  );
 }

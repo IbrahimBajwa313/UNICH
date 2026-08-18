@@ -31,8 +31,8 @@ import {
  * report queries pin non-owner roles (incl. accountant) to their session
  * branch (resolveBranchScope in reporting-engine/access.ts) — data without
  * a branchId is invisible to that role, which is why dates are spread across
- * the last 30 days ending today rather than reusing the base seed's fixed
- * July dates.
+ * this calendar month and last (ending today) rather than reusing the base
+ * seed's fixed July dates.
  */
 
 function daysAgo(n: number, hour = 12, minute = 0) {
@@ -72,8 +72,13 @@ async function main() {
     { $addToSet: { salespeople: { $each: salespeople } } },
   );
 
-  // ---- Sales: 30 days, mixed salesperson/payment/product, with FIFO cost
-  //      on each line so Profit & margin daily has real numbers to show ----
+  // ---- Sales: this month + last month (full calendar coverage — matters
+  //      because the dashboard's Net Profit Margin trend badge compares
+  //      this month's margin to last month's; if sales only covered a
+  //      trailing 30 days while expenses covered full calendar months,
+  //      last month looked artificially starved of revenue), mixed
+  //      salesperson/payment/product, with FIFO cost on each line so
+  //      Profit & margin daily has real numbers to show ----
   const saleSkus = ["BP-001", "SG-001", "PO-012", "SN-004", "RM-STD", "BM-003", "BK-002", "PO-001", "GB-001"];
   const payments = ["cash", "card", "bank", "credit", "mixed"];
   const customerPool = [
@@ -84,16 +89,37 @@ async function main() {
     { phone: "+971 58 220 3344", name: "Walk-in" },
   ];
 
+  const now = new Date();
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const totalSaleDays =
+    Math.floor((todayMidnight.getTime() - startOfLastMonth.getTime()) / 86400000) + 1;
+
   const saleDocs: Record<string, unknown>[] = [];
   let n = 0;
-  for (let dayOffset = 29; dayOffset >= 0; dayOffset--) {
-    const salesToday = 2 + (dayOffset % 3); // 2-4 sales/day
+  for (let dOffset = 0; dOffset < totalSaleDays; dOffset++) {
+    const day = new Date(startOfLastMonth);
+    day.setDate(day.getDate() + dOffset);
+    const salesToday = 2 + (dOffset % 3); // 2-4 sales/day
     for (let i = 0; i < salesToday; i++) {
       const sku = saleSkus[n % saleSkus.length];
       const product = bySku[sku];
       if (!product) {
         n++;
         continue;
+      }
+      const createdAt = new Date(
+        day.getFullYear(),
+        day.getMonth(),
+        day.getDate(),
+        9 + (n % 10),
+        (n * 7) % 60,
+        0,
+        0,
+      );
+      if (createdAt > now) {
+        n++;
+        continue; // hasn't happened yet today
       }
       const qty = 1 + (n % 4);
       const unitPrice = product.sellPrice > 0 ? product.sellPrice : 50;
@@ -104,7 +130,7 @@ async function main() {
       const customer = customerPool[n % customerPool.length];
 
       saleDocs.push({
-        createdAt: daysAgo(dayOffset, 9 + (n % 10), (n * 7) % 60),
+        createdAt,
         customerPhone: customer.phone,
         customerName: customer.name,
         customerId: custByPhone.get(customer.phone),
@@ -142,31 +168,54 @@ async function main() {
   }
   await Sale.insertMany(saleDocs);
 
-  // ---- Expenses: 30 days, 8 categories, mixed approval status ----
-  const expenseCategories = [
-    { category: "Rent", detail: "Shop rent — monthly", amount: 8000 },
-    { category: "Salaries", detail: "Staff salaries", amount: 15000 },
-    { category: "Utilities", detail: "DEWA bill", amount: 620 },
-    { category: "Marketing", detail: "Instagram ads", amount: 350 },
-    { category: "Packaging", detail: "Boxes & labels restock", amount: 280 },
-    { category: "Petty Cash", detail: "Office supplies", amount: 95 },
-    { category: "Maintenance", detail: "AC servicing", amount: 450 },
-    { category: "Transport", detail: "Courier & delivery", amount: 210 },
+  // ---- Expenses: this month + last month, fixed costs posted once each ----
+  // (Rent/Salaries repeating every ~2 days was the bug that drove the
+  // dashboard's Net Profit Margin to -127% — big fixed costs stacked up
+  // 4-6x in a single month and swamped revenue. They post once per
+  // calendar month now, like a real business.)
+  const monthlyExpensePlan: {
+    dayOfMonth: number;
+    category: string;
+    detail: string;
+    amount: number;
+    status?: string;
+  }[] = [
+    { dayOfMonth: 2, category: "Rent", detail: "Shop rent — monthly", amount: 7000 },
+    { dayOfMonth: 6, category: "Utilities", detail: "DEWA bill", amount: 610 },
+    { dayOfMonth: 9, category: "Marketing", detail: "Instagram ads", amount: 320 },
+    { dayOfMonth: 12, category: "Packaging", detail: "Boxes & labels restock", amount: 260 },
+    { dayOfMonth: 14, category: "Petty Cash", detail: "Office supplies", amount: 95 },
+    { dayOfMonth: 18, category: "Maintenance", detail: "AC servicing", amount: 420 },
+    { dayOfMonth: 21, category: "Transport", detail: "Courier & delivery", amount: 210 },
+    { dayOfMonth: 24, category: "Petty Cash", detail: "Cleaning supplies", amount: 80 },
+    { dayOfMonth: 26, category: "Marketing", detail: "Flyer printing", amount: 150, status: "rejected" },
+    { dayOfMonth: 28, category: "Salaries", detail: "Staff salaries", amount: 3500 },
   ];
-  const statuses = ["approved", "approved", "pending", "approved", "rejected"];
 
   const expenseDocs: Record<string, unknown>[] = [];
-  for (let dayOffset = 28; dayOffset >= 0; dayOffset -= 2) {
-    const e = expenseCategories[dayOffset % expenseCategories.length];
-    expenseDocs.push({
-      date: daysAgo(dayOffset, 10, 0),
-      category: e.category,
-      detail: e.detail,
-      amount: e.amount + (dayOffset % 5) * 10,
-      status: statuses[dayOffset % statuses.length],
-      branchId: branch._id,
-      branchName: branch.name,
-    });
+  for (let monthOffset = 0; monthOffset <= 1; monthOffset++) {
+    for (const item of monthlyExpensePlan) {
+      const date = new Date(
+        now.getFullYear(),
+        now.getMonth() - monthOffset,
+        item.dayOfMonth,
+        10,
+        0,
+        0,
+        0,
+      );
+      if (date > now) continue; // hasn't happened yet this month
+      const daysOld = Math.floor((now.getTime() - date.getTime()) / 86400000);
+      expenseDocs.push({
+        date,
+        category: item.category,
+        detail: item.detail,
+        amount: item.amount,
+        status: item.status ?? (daysOld <= 3 ? "pending" : "approved"),
+        branchId: branch._id,
+        branchName: branch.name,
+      });
+    }
   }
   await Expense.insertMany(expenseDocs);
 

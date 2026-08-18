@@ -557,6 +557,10 @@ export interface DashboardData {
     grossMarginTrendPts?: number;
     /** requires pos:read */
     remixSales?: number;
+    /** requires pos:read */
+    transactionsToday?: number;
+    /** requires pos:read */
+    avgSaleValue?: number;
     /** requires inventory:read */
     lowStockCount?: number;
     /** requires inventory:read */
@@ -589,8 +593,16 @@ export interface DashboardData {
   alerts: DashboardAlert[];
   /** requires pos:read */
   recentSales?: { id: string; time: string; customer: string; type: string; total: number; payment: string }[];
+  /** requires pos:read */
+  paymentMix?: { method: string; amount: number; count: number }[];
+  /** requires pos:read */
+  topProductsToday?: { name: string; qty: number; unit: string; revenue: number }[];
   /** requires inventory:read */
   lowStock?: { id: string; name: string; stockSellable: number; lowStockAt: number; unit: StockUnit }[];
+  /** requires inventory:read */
+  stockByCategory?: { category: string; value: number; count: number }[];
+  /** requires inventory:read */
+  stockHealth?: { healthy: number; low: number; out: number };
   /** requires expenses:read */
   expenseByCategory?: { category: string; amount: number }[];
   /** requires expenses:read */
