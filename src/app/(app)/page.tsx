@@ -218,13 +218,15 @@ export default function DashboardPage() {
 
       <div className={`mt-6 grid gap-6 ${canPos || canInventory ? "xl:grid-cols-3" : ""}`}>
         {canPos && (
-          <Panel className="animate-fade-up self-start xl:col-span-2">
+          <Panel className="animate-fade-up flex flex-col xl:col-span-2">
             <PanelHeader
               title="Weekly Sales Mix"
               subtitle="Retail · Wholesale · Remix"
               action={<Badge tone="info">Live</Badge>}
             />
-            <SalesMixChart data={salesTrend} />
+            <div className="flex flex-1 flex-col justify-center">
+              <SalesMixChart data={salesTrend} />
+            </div>
           </Panel>
         )}
 
@@ -264,7 +266,7 @@ export default function DashboardPage() {
               </div>
             }
           />
-          <ul className="space-y-3">
+          <ul className="max-h-[280px] space-y-3 overflow-y-auto pr-1 scrollbar-thin">
             {alerts.length === 0 && (
               <li className="rounded-2xl border border-line/70 bg-mist/60 px-3 py-4 text-center text-sm text-ink-muted">
                 No alerts right now — all clear.
