@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx src/lib/sales/run-tests.ts",
+    "test": "tsx src/lib/sales/run-tests.ts && tsx src/lib/purchases/run-tests.ts",
     "db:seed": "tsx --env-file=.env scripts/seed.ts",
     "db:seed-accountant": "tsx --env-file=.env scripts/seed-accountant-reports.ts",
     "db:health": "tsx --env-file=.env scripts/health.ts",
