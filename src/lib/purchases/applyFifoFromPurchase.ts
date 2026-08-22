@@ -32,9 +32,13 @@ export function derivePurchaseStatus(
 /**
  * Create FIFO layers for any newly received qty (qtyReceived − qtyFifoApplied).
  * Mutates line.qtyFifoApplied in place. Returns productIds that got layers.
+ *
+ * `deps.addFifoLayer` defaults to the real DB-writing implementation; tests
+ * inject a stub to verify call args without touching the database.
  */
 export async function applyFifoFromPurchase(
   po: PurchaseForFifo,
+  deps: { addFifoLayer: typeof addFifoLayer } = { addFifoLayer },
 ): Promise<string[]> {
   const touched: string[] = [];
 
@@ -45,7 +49,7 @@ export async function applyFifoFromPurchase(
     if (delta <= 0) continue;
 
     const productId = String(line.productId);
-    await addFifoLayer({
+    await deps.addFifoLayer({
       productId,
       supplierId: String(po.supplierId),
       supplierName: po.supplierName,

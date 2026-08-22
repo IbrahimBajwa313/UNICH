@@ -1,11 +1,8 @@
 /**
  * Local purchases unit tests (npm run test).
- * Covers PO status derivation, received-qty sync, FIFO-apply delta guard,
- * and supplier avg-lead-days averaging math.
- *
- * Note: applyFifoFromPurchase's DB-writing branch (addFifoLayer) and
- * recalcSupplierAvgLeadDays's Mongo query/update are not covered here —
- * they need a real/mocked DB. Only their pure logic is unit-tested.
+ * Covers PO status derivation, received-qty sync, FIFO-apply (via an
+ * injected addFifoLayer stub, no DB), and supplier avg-lead-days (via
+ * injected query/update stubs, no DB).
  */
 import assert from "node:assert/strict";
 import {
@@ -14,7 +11,7 @@ import {
   applyFifoFromPurchase,
   type PurchaseLineForFifo,
 } from "./applyFifoFromPurchase";
-import { averageLeadDays } from "./supplierLeadTime";
+import { averageLeadDays, recalcSupplierAvgLeadDays } from "./supplierLeadTime";
 
 let passed = 0;
 let failed = 0;
@@ -165,12 +162,30 @@ test("receivedAt before date is clamped to 0, not negative", () => {
   assert.equal(avg, 0);
 });
 
+function fakeAddFifoLayer() {
+  const calls: Array<{
+    productId: string;
+    supplierId: string;
+    supplierName: string;
+    purchaseDate: Date;
+    qty: number;
+    unitCost: number;
+    currency: string;
+  }> = [];
+  const fn = async (input: (typeof calls)[number]) => {
+    calls.push(input);
+    return {} as never;
+  };
+  return { fn, calls };
+}
+
 async function main() {
-  console.log("applyFifoFromPurchase (delta guard, no DB hit)");
+  console.log("applyFifoFromPurchase (injected addFifoLayer stub, no DB)");
 
   // All lines already fully FIFO-applied → delta <= 0 for every line, so
-  // addFifoLayer (DB write) is never called and this can run without a DB.
-  await testAsync("no new receipt qty → returns empty, no DB call", async () => {
+  // the injected addFifoLayer stub must never be called.
+  await testAsync("no new receipt qty → returns empty, stub not called", async () => {
+    const { fn, calls } = fakeAddFifoLayer();
     const po = {
       supplierId: "sup-1",
       supplierName: "Acme",
@@ -187,13 +202,80 @@ async function main() {
         },
       ],
     };
-    const touched = await applyFifoFromPurchase(po);
+    const touched = await applyFifoFromPurchase(po, { addFifoLayer: fn });
     assert.deepEqual(touched, []);
+    assert.equal(calls.length, 0);
     assert.equal(po.lines[0].qtyFifoApplied, 10);
   });
 
-  // Malformed/negative qty fields coerce to 0 and also skip the DB write
-  await testAsync("NaN/negative qty fields coerce to 0 → no DB call", async () => {
+  // New receipt qty → stub called once with the delta (not the full qty),
+  // and qtyFifoApplied / touched reflect that call.
+  await testAsync("new receipt qty → stub called with delta, state updated", async () => {
+    const { fn, calls } = fakeAddFifoLayer();
+    const po = {
+      supplierId: "sup-1",
+      supplierName: "Acme",
+      date: new Date("2026-01-01"),
+      currency: "AED",
+      lines: [
+        {
+          productId: "p1",
+          productName: "Ethanol",
+          qtyOrdered: 10,
+          qtyReceived: 10,
+          qtyFifoApplied: 4, // 4 already applied earlier → delta is 6
+          unitCost: 5,
+        },
+      ],
+    };
+    const touched = await applyFifoFromPurchase(po, { addFifoLayer: fn });
+    assert.deepEqual(touched, ["p1"]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].qty, 6);
+    assert.equal(calls[0].productId, "p1");
+    assert.equal(calls[0].supplierId, "sup-1");
+    assert.equal(calls[0].unitCost, 5);
+    assert.equal(calls[0].currency, "AED");
+    assert.equal(po.lines[0].qtyFifoApplied, 10);
+  });
+
+  // Mixed lines: stub is called only for lines with a positive delta.
+  await testAsync("mixed lines → stub called only for positive-delta lines", async () => {
+    const { fn, calls } = fakeAddFifoLayer();
+    const po = {
+      supplierId: "sup-1",
+      supplierName: "Acme",
+      date: new Date("2026-01-01"),
+      currency: "AED",
+      lines: [
+        {
+          productId: "p1",
+          productName: "Ethanol",
+          qtyOrdered: 10,
+          qtyReceived: 10,
+          qtyFifoApplied: 10, // no delta
+          unitCost: 5,
+        },
+        {
+          productId: "p2",
+          productName: "Fixative",
+          qtyOrdered: 5,
+          qtyReceived: 5,
+          qtyFifoApplied: 0, // delta 5
+          unitCost: 2,
+        },
+      ],
+    };
+    const touched = await applyFifoFromPurchase(po, { addFifoLayer: fn });
+    assert.deepEqual(touched, ["p2"]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].productId, "p2");
+    assert.equal(calls[0].qty, 5);
+  });
+
+  // Malformed/negative qty fields coerce to 0 and also skip the stub call.
+  await testAsync("NaN/negative qty fields coerce to 0 → stub not called", async () => {
+    const { fn, calls } = fakeAddFifoLayer();
     const po = {
       supplierId: "sup-1",
       supplierName: "Acme",
@@ -210,8 +292,40 @@ async function main() {
         },
       ],
     };
-    const touched = await applyFifoFromPurchase(po);
+    const touched = await applyFifoFromPurchase(po, { addFifoLayer: fn });
     assert.deepEqual(touched, []);
+    assert.equal(calls.length, 0);
+  });
+
+  console.log("recalcSupplierAvgLeadDays (injected query/update stubs, no DB)");
+
+  // Completed orders → avg computed and passed to the update stub.
+  await testAsync("computes avg and calls update stub once", async () => {
+    const updateCalls: Array<{ supplierId: string; avgLeadDays: number }> = [];
+    await recalcSupplierAvgLeadDays("sup-1", {
+      loadCompletedOrders: async () => [
+        { date: "2026-01-01" as unknown as Date, receivedAt: "2026-01-04" as unknown as Date }, // 3 days
+        { date: "2026-01-01" as unknown as Date, receivedAt: "2026-01-08" as unknown as Date }, // 7 days
+      ],
+      updateAvgLeadDays: async (supplierId, avgLeadDays) => {
+        updateCalls.push({ supplierId, avgLeadDays });
+      },
+    });
+    assert.equal(updateCalls.length, 1);
+    assert.equal(updateCalls[0].supplierId, "sup-1");
+    assert.equal(updateCalls[0].avgLeadDays, 5); // (3 + 7) / 2
+  });
+
+  // No completed orders → update stub must never be called.
+  await testAsync("no completed orders → update stub not called", async () => {
+    const updateCalls: Array<{ supplierId: string; avgLeadDays: number }> = [];
+    await recalcSupplierAvgLeadDays("sup-1", {
+      loadCompletedOrders: async () => [],
+      updateAvgLeadDays: async (supplierId, avgLeadDays) => {
+        updateCalls.push({ supplierId, avgLeadDays });
+      },
+    });
+    assert.equal(updateCalls.length, 0);
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

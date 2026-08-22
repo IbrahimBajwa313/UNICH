@@ -15,13 +15,9 @@ export function averageLeadDays(
   return Math.round(totalDays / orders.length);
 }
 
-/**
- * PUR-12: recompute Supplier.avgLeadDays from actual order→receipt gaps
- * across that supplier's fully received purchase orders.
- */
-export async function recalcSupplierAvgLeadDays(
+async function loadCompletedOrders(
   supplierId: string,
-): Promise<void> {
+): Promise<Array<{ date: Date; receivedAt: Date }>> {
   const completed = await PurchaseOrder.find({
     supplierId,
     status: "received",
@@ -29,15 +25,37 @@ export async function recalcSupplierAvgLeadDays(
   })
     .select("date receivedAt")
     .lean();
+  return completed.map((po) => ({
+    date: po.date as Date,
+    receivedAt: po.receivedAt as Date,
+  }));
+}
 
+async function updateSupplierAvgLeadDays(
+  supplierId: string,
+  avgLeadDays: number,
+): Promise<void> {
+  await Supplier.updateOne({ _id: supplierId }, { $set: { avgLeadDays } });
+}
+
+/**
+ * PUR-12: recompute Supplier.avgLeadDays from actual order→receipt gaps
+ * across that supplier's fully received purchase orders.
+ *
+ * `deps` default to the real DB-backed implementations; tests inject stubs
+ * to verify the compute/skip logic without touching the database.
+ */
+export async function recalcSupplierAvgLeadDays(
+  supplierId: string,
+  deps: {
+    loadCompletedOrders: typeof loadCompletedOrders;
+    updateAvgLeadDays: typeof updateSupplierAvgLeadDays;
+  } = { loadCompletedOrders, updateAvgLeadDays: updateSupplierAvgLeadDays },
+): Promise<void> {
+  const completed = await deps.loadCompletedOrders(supplierId);
   if (!completed.length) return;
 
-  const avgLeadDays = averageLeadDays(
-    completed.map((po) => ({
-      date: po.date as Date,
-      receivedAt: po.receivedAt as Date,
-    })),
-  );
+  const avgLeadDays = averageLeadDays(completed);
   if (avgLeadDays === null) return;
-  await Supplier.updateOne({ _id: supplierId }, { $set: { avgLeadDays } });
+  await deps.updateAvgLeadDays(supplierId, avgLeadDays);
 }
