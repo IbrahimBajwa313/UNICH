@@ -1,8 +1,9 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Bell, Wifi } from "lucide-react";
+import { Bell, Moon, Sun, Wifi } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { useTheme } from "@/components/theme/ThemeProvider";
 
 const PAGE_TITLES: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
@@ -33,6 +34,7 @@ function resolvePageTitle(pathname: string, fallback?: string) {
 export function TopBar({ title }: { title?: string }) {
   const pathname = usePathname();
   const pageTitle = resolvePageTitle(pathname, title);
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line/70 bg-canvas/80 px-6 backdrop-blur-xl">
@@ -52,6 +54,15 @@ export function TopBar({ title }: { title?: string }) {
         <Badge tone="gold" className="hidden lg:inline-flex">
           Prototype
         </Badge>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-paper text-ink-muted transition hover:border-gold/40 hover:text-ink"
+          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
         <button
           type="button"
           className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-paper text-ink-muted transition hover:border-gold/40 hover:text-ink"

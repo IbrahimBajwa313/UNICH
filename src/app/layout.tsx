@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { ThemeProvider, THEME_INIT_SCRIPT } from "@/components/theme/ThemeProvider";
 import "./globals.css";
 
 const display = Plus_Jakarta_Sans({
@@ -22,8 +23,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${display.variable} h-full`} suppressHydrationWarning>
+      <head>
+        {/* Sets data-theme before first paint so a stored "light" preference doesn't flash dark. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full font-sans antialiased" suppressHydrationWarning>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
