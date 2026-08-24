@@ -307,7 +307,7 @@ function PosPageInner() {
       setCustomerName("");
       setPhone("");
       setEmail("");
-      router.push(customerId ? `/customers?customerId=${customerId}` : "/customers");
+      router.push(customerId ? `/customers/${customerId}` : "/customers");
     } catch (err) {
       flash(err instanceof Error ? err.message : "Could not complete sale", 6000, "err");
     } finally {

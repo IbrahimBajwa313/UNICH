@@ -2,23 +2,38 @@ export const TOLA_ML = 12;
 export const HALF_TOLA_ML = 6;
 export const QUARTER_TOLA_ML = 3;
 
+/**
+ * Intl.NumberFormat inserts a NO-BREAK SPACE (U+00A0) between the currency
+ * code and the number — great for prose, but it means "OMR 37,050.00" can
+ * never wrap onto a second line. In a narrow stat box that forces the whole
+ * box to overflow into its neighbor instead of wrapping. Swap it for a
+ * normal space so long amounts can still break and stay inside their box.
+ */
+function withBreakableSpace(formatted: string): string {
+  return formatted.replace(/ /g, " ");
+}
+
 export function formatMoney(amount: number, currency = "OMR"): string {
-  return new Intl.NumberFormat("en-OM", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 3,
-  }).format(amount);
+  return withBreakableSpace(
+    new Intl.NumberFormat("en-OM", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 3,
+    }).format(amount),
+  );
 }
 
 /** Short form for tight chart labels, e.g. "OMR 6.2K" instead of "OMR 6,200.00". */
 export function formatMoneyCompact(amount: number, currency = "OMR"): string {
-  return new Intl.NumberFormat("en-OM", {
-    style: "currency",
-    currency,
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(amount);
+  return withBreakableSpace(
+    new Intl.NumberFormat("en-OM", {
+      style: "currency",
+      currency,
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(amount),
+  );
 }
 
 export function formatQty(qty: number, unit: string): string {
