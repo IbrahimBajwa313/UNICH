@@ -22,7 +22,7 @@ export async function ensureProductionSupplier() {
     supplier = await Supplier.create({
       name: PRODUCTION_SUPPLIER_NAME,
       phone: "internal",
-      currency: "AED",
+      currency: "OMR",
       creditLimit: 0,
       outstanding: 0,
       avgLeadDays: 0,
@@ -264,7 +264,7 @@ export async function completeProductionOrder(
       purchaseDate: producedAt,
       qty: order.outputQty,
       unitCost,
-      currency: "AED",
+      currency: "OMR",
     });
     layerId = String(layer._id);
   } catch (err) {

@@ -84,7 +84,7 @@ async function main() {
   const supplier = await Supplier.create({
     name: "E2E Test Supplier",
     phone: "0000000000",
-    currency: "AED",
+    currency: "OMR",
   });
   const product = await Product.create({
     sku: `E2E-${Date.now()}`,
@@ -122,7 +122,7 @@ async function main() {
         body: JSON.stringify({
           supplierId: String(supplier._id),
           supplierName: supplier.name,
-          currency: "AED",
+          currency: "OMR",
           date: orderedAt.toISOString(),
           status: "received",
           lines: [

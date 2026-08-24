@@ -190,7 +190,7 @@ async function main() {
       supplierId: "sup-1",
       supplierName: "Acme",
       date: new Date("2026-01-01"),
-      currency: "AED",
+      currency: "OMR",
       lines: [
         {
           productId: "p1",
@@ -216,7 +216,7 @@ async function main() {
       supplierId: "sup-1",
       supplierName: "Acme",
       date: new Date("2026-01-01"),
-      currency: "AED",
+      currency: "OMR",
       lines: [
         {
           productId: "p1",
@@ -235,7 +235,7 @@ async function main() {
     assert.equal(calls[0].productId, "p1");
     assert.equal(calls[0].supplierId, "sup-1");
     assert.equal(calls[0].unitCost, 5);
-    assert.equal(calls[0].currency, "AED");
+    assert.equal(calls[0].currency, "OMR");
     assert.equal(po.lines[0].qtyFifoApplied, 10);
   });
 
@@ -246,7 +246,7 @@ async function main() {
       supplierId: "sup-1",
       supplierName: "Acme",
       date: new Date("2026-01-01"),
-      currency: "AED",
+      currency: "OMR",
       lines: [
         {
           productId: "p1",
@@ -280,7 +280,7 @@ async function main() {
       supplierId: "sup-1",
       supplierName: "Acme",
       date: new Date("2026-01-01"),
-      currency: "AED",
+      currency: "OMR",
       lines: [
         {
           productId: "p2",

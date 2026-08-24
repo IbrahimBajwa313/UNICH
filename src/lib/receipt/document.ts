@@ -30,7 +30,7 @@ export function receiptStoreFromSettings(
     taxNumber: s.storeTaxNumber?.trim() || "",
     logoUrl: s.receiptLogoUrl?.trim() || "",
     footer: s.receiptFooter?.trim() || "Thank you for shopping with UNICH.",
-    currency: s.currency?.trim() || "AED",
+    currency: s.currency?.trim() || "OMR",
     bilingual: /arab/i.test(s.invoiceLanguages || ""),
   };
 }

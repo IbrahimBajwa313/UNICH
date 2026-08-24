@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       purchaseDate: new Date(body.purchaseDate),
       qty: Number(body.qtyRemaining ?? body.qty),
       unitCost: Number(body.unitCost),
-      currency: body.currency || "AED",
+      currency: body.currency || "OMR",
     });
     return NextResponse.json(toJSON(layer), { status: 201 });
   } catch (error) {

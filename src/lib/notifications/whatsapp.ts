@@ -31,7 +31,7 @@ export function formatQuotationMessage(input: {
   const money = (n: number) =>
     new Intl.NumberFormat("en-AE", {
       style: "currency",
-      currency: input.currency || "AED",
+      currency: input.currency || "OMR",
       minimumFractionDigits: 2,
     }).format(n);
 
@@ -61,7 +61,7 @@ export function formatQuotationSms(input: {
   currency?: string;
   approvalUrl?: string;
 }): string {
-  const currency = input.currency || "AED";
+  const currency = input.currency || "OMR";
   const store = storeWhatsAppNumber();
   return [
     `UNICH Quotation ${input.number}:`,

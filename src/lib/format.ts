@@ -2,8 +2,8 @@ export const TOLA_ML = 12;
 export const HALF_TOLA_ML = 6;
 export const QUARTER_TOLA_ML = 3;
 
-export function formatMoney(amount: number, currency = "AED"): string {
-  return new Intl.NumberFormat("en-AE", {
+export function formatMoney(amount: number, currency = "OMR"): string {
+  return new Intl.NumberFormat("en-OM", {
     style: "currency",
     currency,
     minimumFractionDigits: 2,
@@ -11,9 +11,9 @@ export function formatMoney(amount: number, currency = "AED"): string {
   }).format(amount);
 }
 
-/** Short form for tight chart labels, e.g. "AED 6.2K" instead of "AED 6,200.00". */
-export function formatMoneyCompact(amount: number, currency = "AED"): string {
-  return new Intl.NumberFormat("en-AE", {
+/** Short form for tight chart labels, e.g. "OMR 6.2K" instead of "OMR 6,200.00". */
+export function formatMoneyCompact(amount: number, currency = "OMR"): string {
+  return new Intl.NumberFormat("en-OM", {
     style: "currency",
     currency,
     notation: "compact",

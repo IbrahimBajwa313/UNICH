@@ -344,7 +344,7 @@ export async function POST(req: Request) {
       supplier = await Supplier.create({
         name: ADJUSTMENT_SUPPLIER,
         phone: "internal",
-        currency: "AED",
+        currency: "OMR",
         creditLimit: 0,
         outstanding: 0,
         avgLeadDays: 0,
@@ -364,7 +364,7 @@ export async function POST(req: Request) {
       unitCost: Number.isFinite(unitCost) && unitCost >= 0
         ? unitCost
         : Number(product.costFifo) || 0,
-      currency: "AED",
+      currency: "OMR",
     });
 
     const adjustment = await InventoryAdjustment.create({

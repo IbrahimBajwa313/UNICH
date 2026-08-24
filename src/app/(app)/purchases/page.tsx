@@ -219,7 +219,7 @@ export default function PurchasesPage() {
         actions={
           canWrite ? (
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setSupplierDraft({ currency: "AED" })}>
+              <Button variant="secondary" onClick={() => setSupplierDraft({ currency: "OMR" })}>
                 Add Supplier
               </Button>
               <Button
@@ -227,7 +227,7 @@ export default function PurchasesPage() {
                 onClick={() =>
                   setPurchaseDraft({
                     supplierId: "",
-                    currency: "AED",
+                    currency: "OMR",
                     status: "ordered",
                     lines: [
                       { productId: "", productName: "", sku: "", qtyOrdered: "1", unitCost: "" },
@@ -250,7 +250,7 @@ export default function PurchasesPage() {
         <Stat label="Active Suppliers" value={String(supplierList.length)} />
         <Stat label="Open Payables" value={formatMoney(outstanding)} />
         <Stat label="POs This Month" value={String(purchaseList.length)} />
-        <Stat label="Currencies" value="AED · USD" hint="Multi-currency ready" />
+        <Stat label="Currencies" value="OMR · USD" hint="Multi-currency ready" />
       </div>
 
       {formError ? (
@@ -491,7 +491,7 @@ export default function PurchasesPage() {
             />
             <Field
               label="Currency"
-              value={supplierDraft.currency || "AED"}
+              value={supplierDraft.currency || "OMR"}
               onChange={(currency) => setSupplierDraft({ ...supplierDraft, currency })}
             />
             <Field

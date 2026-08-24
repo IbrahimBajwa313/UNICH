@@ -32,7 +32,7 @@ export async function loadReceiptSettings(): Promise<ReceiptSettings> {
   const format = raw.receiptFormat === "a4" ? "a4" : "thermal";
   const value: ReceiptSettings = {
     branchName: str(raw.branchName),
-    currency: str(raw.currency) || "AED",
+    currency: str(raw.currency) || "OMR",
     invoiceLanguages: str(raw.invoiceLanguages),
     storeLegalName: str(raw.storeLegalName),
     storeAddress: str(raw.storeAddress),

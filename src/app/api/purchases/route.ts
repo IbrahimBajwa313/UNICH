@@ -103,7 +103,7 @@ export async function POST(req: Request) {
     const purchase = await PurchaseOrder.create({
       supplierId: body.supplierId,
       supplierName: body.supplierName,
-      currency: body.currency || "AED",
+      currency: body.currency || "OMR",
       notes: body.notes,
       date: new Date(body.date || Date.now()),
       status,

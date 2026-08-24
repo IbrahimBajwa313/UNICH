@@ -33,7 +33,7 @@ export async function loadQuotationSettings(): Promise<QuotationSettings> {
   const raw = settings ?? {};
   const value: QuotationSettings = {
     branchName: str(raw.branchName),
-    currency: str(raw.currency) || "AED",
+    currency: str(raw.currency) || "OMR",
     invoiceLanguages: str(raw.invoiceLanguages),
     storeLegalName: str(raw.storeLegalName),
     storeAddress: str(raw.storeAddress),

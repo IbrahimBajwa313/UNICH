@@ -350,7 +350,7 @@ export async function GET(req: Request) {
               id: "weekly-report",
               type: "report" as const,
               title: "Weekly sales report ready",
-              detail: `Last 7 days · AED ${weekTotal.toFixed(2)} total`,
+              detail: `Last 7 days · OMR ${weekTotal.toFixed(2)} total`,
               severity: "info" as const,
             },
           ]
@@ -363,7 +363,7 @@ export async function GET(req: Request) {
                     id: "receivables-summary",
                     type: "receivables" as const,
                     title: `${receivableCustomers.length} customer${receivableCustomers.length === 1 ? "" : "s"} with outstanding balance`,
-                    detail: `AED ${accountsReceivable.toFixed(2)} total receivable`,
+                    detail: `OMR ${accountsReceivable.toFixed(2)} total receivable`,
                     severity: "warning" as const,
                   },
                 ]
@@ -374,7 +374,7 @@ export async function GET(req: Request) {
                     id: "payables-summary",
                     type: "payables" as const,
                     title: `${payableSuppliers.length} supplier${payableSuppliers.length === 1 ? "" : "s"} with outstanding balance`,
-                    detail: `AED ${accountsPayable.toFixed(2)} total payable`,
+                    detail: `OMR ${accountsPayable.toFixed(2)} total payable`,
                     severity: "warning" as const,
                   },
                 ]

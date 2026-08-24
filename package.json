@@ -13,6 +13,7 @@
     "db:seed-accountant": "tsx --env-file=.env scripts/seed-accountant-reports.ts",
     "db:health": "tsx --env-file=.env scripts/health.ts",
     "db:migrate-roles": "tsx --env-file=.env scripts/migrate-roles.ts",
+    "db:migrate-currency-omr": "tsx --env-file=.env scripts/migrate-currency-omr.ts",
     "receipt:preview": "tsx scripts/receipt-preview.ts"
   },
   "dependencies": {

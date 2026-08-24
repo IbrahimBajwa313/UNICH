@@ -23,8 +23,8 @@ export const REMIX_OIL_ML = 20;
  */
 export const REFILL_CUSTOMER_BOTTLE_ML = 100;
 
-/** Backend-owned refill service rate (AED per ml). */
-export const REFILL_AED_PER_ML = 1.2;
+/** Backend-owned refill service rate (OMR per ml). */
+export const REFILL_OMR_PER_ML = 1.2;
 
 /** BLD-09 refill accessories the customer is charged for (bottle is customer-supplied). */
 export const REFILL_CHARGEABLE_PACKAGING_ROLES = [

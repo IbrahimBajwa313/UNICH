@@ -43,7 +43,7 @@ const FifoLayerSchema = new Schema(
     purchaseDate: { type: Date, required: true },
     qtyRemaining: { type: Number, required: true },
     unitCost: { type: Number, required: true },
-    currency: { type: String, required: true, default: "AED" },
+    currency: { type: String, required: true, default: "OMR" },
     /** purchase = goods receipt; production = finished goods from a production order */
     source: {
       type: String,
@@ -85,7 +85,7 @@ const SupplierSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true },
-    currency: { type: String, required: true, default: "AED" },
+    currency: { type: String, required: true, default: "OMR" },
     creditLimit: { type: Number, default: 0 },
     outstanding: { type: Number, default: 0 },
     lastPurchase: { type: Date },
@@ -215,7 +215,7 @@ const PurchaseOrderSchema = new Schema(
       enum: ["draft", "ordered", "received", "partial"],
       default: "draft",
     },
-    currency: { type: String, required: true, default: "AED" },
+    currency: { type: String, required: true, default: "OMR" },
     total: { type: Number, required: true, default: 0 },
     itemCount: { type: Number, required: true, default: 0 },
     lines: { type: [PurchaseOrderLineSchema], default: [] },
@@ -525,7 +525,7 @@ const AppSettingsSchema = new Schema(
   {
     key: { type: String, required: true, unique: true },
     branchName: { type: String, default: "Main Store — Dubai" },
-    currency: { type: String, default: "AED" },
+    currency: { type: String, default: "OMR" },
     uiLanguage: { type: String, default: "English" },
     invoiceLanguages: { type: String, default: "English + Arabic" },
     qtyPrecision: { type: Number, default: 3 },

@@ -56,7 +56,7 @@ export async function applyFifoFromPurchase(
       purchaseDate: po.date instanceof Date ? po.date : new Date(po.date),
       qty: delta,
       unitCost: Number(line.unitCost) || 0,
-      currency: po.currency || "AED",
+      currency: po.currency || "OMR",
     });
     line.qtyFifoApplied = applied + delta;
     touched.push(productId);

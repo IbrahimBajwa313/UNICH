@@ -3,7 +3,7 @@ import { resolveDeductMlFromUnitLabel } from "@/lib/format";
 import { Formula, Product } from "@/lib/models";
 import {
   OIL_BASE_PRODUCT_ID,
-  REFILL_AED_PER_ML,
+  REFILL_OMR_PER_ML,
   REFILL_CUSTOMER_BOTTLE_ML,
   REMIX_OIL_ML,
   REMIX_REQUIRED_ROLES,
@@ -653,8 +653,8 @@ export async function validateSaleLines(
           `Refill accepts only ${REFILL_CUSTOMER_BOTTLE_ML}ml customer bottles (got ${deductMl}ml)`,
         );
       }
-      // Backend-owned refill service rate (AED per ml) — do not trust client unitPrice
-      const unitPrice = Number((REFILL_AED_PER_ML * deductMl).toFixed(3));
+      // Backend-owned refill service rate (OMR per ml) — do not trust client unitPrice
+      const unitPrice = Number((REFILL_OMR_PER_ML * deductMl).toFixed(3));
       const unitLabel = `${REFILL_CUSTOMER_BOTTLE_ML}ml refill`;
 
       lines.push({
