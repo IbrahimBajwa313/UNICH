@@ -154,6 +154,14 @@ export function requireApiAccess(
     return auth;
   }
 
+  // Header notification bell — same audience as the dashboard it mirrors.
+  if (path.startsWith("/api/notifications")) {
+    if (!hasPermission(auth.role, "dashboard:read")) {
+      return deny("Permission denied (dashboard:read).");
+    }
+    return auth;
+  }
+
   const base = permissionForApiPath(path);
   if (!base) {
     return auth; // authenticated catch-all for unmapped APIs

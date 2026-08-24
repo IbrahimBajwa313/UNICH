@@ -885,3 +885,32 @@ AuditLogSchema.index({ entityType: 1, entityId: 1 });
 AuditLogSchema.index({ userId: 1, createdAt: -1 });
 
 export const AuditLog = models.AuditLog || model("AuditLog", AuditLogSchema);
+
+/**
+ * Header notification bell — one document per distinct alert condition
+ * (e.g. "product X below threshold"), synced from live business state
+ * (src/lib/notifications/alerts.ts) each time the bell is opened.
+ * `dedupeKey` is stable per condition so re-syncing updates the existing
+ * row instead of spamming duplicates; `resolved` is set once the
+ * underlying condition clears (stock restocked, balance paid, etc.).
+ */
+const NotificationSchema = new Schema(
+  {
+    dedupeKey: { type: String, required: true, unique: true },
+    type: { type: String, required: true },
+    title: { type: String, required: true },
+    detail: { type: String, default: "" },
+    severity: {
+      type: String,
+      enum: ["info", "warning", "critical"],
+      default: "info",
+    },
+    read: { type: Boolean, default: false },
+    resolved: { type: Boolean, default: false },
+  },
+  { timestamps: true },
+);
+NotificationSchema.index({ resolved: 1, read: 1, createdAt: -1 });
+
+export const Notification =
+  models.Notification || model("Notification", NotificationSchema);

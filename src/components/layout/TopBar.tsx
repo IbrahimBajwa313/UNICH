@@ -1,8 +1,9 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Bell, Moon, Sun, Wifi } from "lucide-react";
+import { Moon, Sun, Wifi } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { useTheme } from "@/components/theme/ThemeProvider";
 
 const PAGE_TITLES: { href: string; label: string }[] = [
@@ -63,14 +64,7 @@ export function TopBar({ title }: { title?: string }) {
         >
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
-        <button
-          type="button"
-          className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line bg-paper text-ink-muted transition hover:border-gold/40 hover:text-ink"
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 animate-[pulse-soft_2s_ease-in-out_infinite] rounded-full bg-coral" />
-        </button>
+        <NotificationBell />
       </div>
     </header>
   );
