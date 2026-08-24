@@ -209,13 +209,13 @@ function CustomerDetailInner({ id }: { id: string }) {
             <div className="grid grid-cols-2 gap-2">
               <div className="min-w-0 rounded-lg border border-line/60 bg-mist/40 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-ink-muted">Lifetime</p>
-                <p className="truncate font-semibold" title={formatMoney(customer.totalPurchases)}>
+                <p className="break-words font-semibold leading-snug">
                   {formatMoney(customer.totalPurchases)}
                 </p>
               </div>
               <div className="min-w-0 rounded-lg border border-line/60 bg-mist/40 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-ink-muted">Credit Due</p>
-                <p className="truncate font-semibold" title={formatMoney(customer.creditBalance)}>
+                <p className="break-words font-semibold leading-snug">
                   {formatMoney(customer.creditBalance)}
                 </p>
               </div>

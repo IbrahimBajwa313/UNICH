@@ -10,7 +10,7 @@ export const QUARTER_TOLA_ML = 3;
  * normal space so long amounts can still break and stay inside their box.
  */
 function withBreakableSpace(formatted: string): string {
-  return formatted.replace(/ /g, " ");
+  return formatted.replace(/\u00A0/g, " ");
 }
 
 export function formatMoney(amount: number, currency = "OMR"): string {
