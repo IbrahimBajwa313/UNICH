@@ -11,11 +11,13 @@ import {
   FileText,
   FlaskConical,
   History,
+  Landmark,
   Mail,
   Pause,
   Play,
   Printer,
   Search,
+  Shuffle,
   Smartphone,
   Trash2,
   MessageCircle,
@@ -170,9 +172,9 @@ const emptyFormulas: Formula[] = [];
 const payments: { id: PaymentMethod; label: string; icon: React.ReactNode }[] = [
   { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" /> },
   { id: "card", label: "Card", icon: <CreditCard className="h-4 w-4" /> },
-  { id: "bank", label: "Bank", icon: <Banknote className="h-4 w-4" /> },
+  { id: "bank", label: "Bank", icon: <Landmark className="h-4 w-4" /> },
   { id: "credit", label: "Credit", icon: <FileClock className="h-4 w-4" /> },
-  { id: "mixed", label: "Mixed", icon: <CreditCard className="h-4 w-4" /> },
+  { id: "mixed", label: "Mixed", icon: <Shuffle className="h-4 w-4" /> },
 ];
 
 const emptyHeld: HeldSale[] = [];
