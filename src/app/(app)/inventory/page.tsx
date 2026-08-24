@@ -1217,10 +1217,18 @@ export default function InventoryPage() {
                           <tbody>
                             {errorRows.map((r) => (
                               <tr key={r.rowNumber} className="border-t border-line/60">
-                                <td className="px-3 py-2">{r.rowNumber}</td>
-                                <td className="px-3 py-2">{r.sku || "—"}</td>
-                                <td className="px-3 py-2 text-ink-muted">
-                                  {r.errorReason}
+                                <td className="px-3 py-2 align-top">{r.rowNumber}</td>
+                                <td className="px-3 py-2 align-top">{r.sku || "—"}</td>
+                                <td className="px-3 py-2 align-top text-ink-muted">
+                                  <ul className="list-disc space-y-0.5 pl-4">
+                                    {(r.errorReason || "")
+                                      .split(";")
+                                      .map((issue) => issue.trim())
+                                      .filter(Boolean)
+                                      .map((issue, i) => (
+                                        <li key={i}>{issue}</li>
+                                      ))}
+                                  </ul>
                                 </td>
                               </tr>
                             ))}

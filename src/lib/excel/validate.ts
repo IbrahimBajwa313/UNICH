@@ -88,57 +88,57 @@ export function validateImportRows(
   for (const row of rows) {
     const errors: string[] = [];
 
-    if (!row.name) errors.push("Product Name is required");
-    if (!row.category) errors.push("Category is required");
-    if (!row.unit) errors.push("Unit is required");
-    if (row.costPrice == null) errors.push("Cost Price is required");
-    if (row.retailPrice == null) errors.push("Retail Price is required");
-    if (!row.itemType) errors.push("Item Type is required");
+    if (!row.name) errors.push("Missing Product Name");
+    if (!row.category) errors.push("Missing Category — pick one from the Lists sheet");
+    if (!row.unit) errors.push("Missing Unit — use ml, pcs, g, or kg");
+    if (row.costPrice == null) errors.push("Missing Cost Price");
+    if (row.retailPrice == null) errors.push("Missing Retail Price");
+    if (!row.itemType) errors.push("Missing Item Type — pick one from the Lists sheet");
 
     const category = row.category as ProductCategory;
     if (row.category && !PRODUCT_CATEGORIES.includes(category)) {
-      errors.push(`Invalid Category: ${row.category}`);
+      errors.push(`Category "${row.category}" isn't on the list — pick one from the Lists sheet`);
     }
 
     const unit = row.unit as StockUnit;
     if (row.unit && !STOCK_UNITS.includes(unit)) {
-      errors.push(`Invalid Unit: ${row.unit} (use ml, pcs, g, or kg)`);
+      errors.push(`Unit "${row.unit}" isn't valid — use ml, pcs, g, or kg`);
     }
 
     if (
       row.concentration &&
       !CONCENTRATIONS.includes(row.concentration as (typeof CONCENTRATIONS)[number])
     ) {
-      errors.push(`Invalid Concentration: ${row.concentration}`);
+      errors.push(`Concentration "${row.concentration}" isn't on the list — pick one from the Lists sheet`);
     }
 
     const itemType = itemTypeFromLabel(row.itemType);
     if (row.itemType && !itemType) {
       errors.push(
-        `Invalid Item Type: ${row.itemType} (Finished Product / Packaging Component / Raw Material)`,
+        `Item Type "${row.itemType}" isn't valid — use Finished Product, Packaging Component, or Raw Material`,
       );
     }
 
-    if (row.costPrice != null && row.costPrice < 0) errors.push("Cost Price cannot be negative");
-    if (row.retailPrice != null && row.retailPrice < 0) errors.push("Retail Price cannot be negative");
+    if (row.costPrice != null && row.costPrice < 0) errors.push("Cost Price can't be negative");
+    if (row.retailPrice != null && row.retailPrice < 0) errors.push("Retail Price can't be negative");
     if (row.wholesalePrice != null && row.wholesalePrice < 0) {
-      errors.push("Wholesale Price cannot be negative");
+      errors.push("Wholesale Price can't be negative");
     }
     if (row.costPrice === 0 && row.retailPrice === 0) {
-      errors.push("Cost and Retail cannot both be zero");
+      errors.push("Cost Price and Retail Price can't both be 0");
     }
 
     if (PRODUCT_CATEGORIES.includes(category) && STOCK_UNITS.includes(unit)) {
       if (OIL_CATEGORIES.has(category) && unit !== "ml") {
-        errors.push(`Category ${category} requires Unit ml`);
+        errors.push(`"${category}" products must use Unit = ml`);
       }
       if (PCS_PREFERRED_CATEGORIES.has(category) && unit !== "pcs") {
-        errors.push(`Category ${category} requires Unit pcs`);
+        errors.push(`"${category}" products must use Unit = pcs`);
       }
       if (OIL_CATEGORIES.has(category) && row.size) {
         const sizeNum = parseSizeNumber(row.size);
         if (sizeNum != null && sizeNum % 5 !== 0) {
-          errors.push("Oil Size must be a multiple of 5 ml");
+          errors.push("Size must be a multiple of 5 ml (e.g. 5, 10, 15...)");
         }
       }
     }
@@ -147,7 +147,7 @@ export function validateImportRows(
     if (row.name && row.category) {
       if (fileNameCat.has(nameCatKey)) {
         errors.push(
-          `Duplicate Product Name + Category in file (also row ${fileNameCat.get(nameCatKey)})`,
+          `Same Product Name + Category used twice in this file (also row ${fileNameCat.get(nameCatKey)}) — each product needs to be unique`,
         );
       } else {
         fileNameCat.set(nameCatKey, row.rowNumber);
@@ -161,26 +161,26 @@ export function validateImportRows(
     if (sku) {
       if (fileSkus.has(sku.toLowerCase())) {
         errors.push(
-          `Duplicate Internal Code in file (also row ${fileSkus.get(sku.toLowerCase())})`,
+          `Internal Code "${sku}" used twice in this file (also row ${fileSkus.get(sku.toLowerCase())})`,
         );
       } else {
         fileSkus.set(sku.toLowerCase(), row.rowNumber);
       }
       existingProduct = bySku.get(sku.toLowerCase());
       if (!existingProduct) {
-        errors.push(`Internal Code ${sku} not found — leave blank to create new`);
+        errors.push(`No existing product has Internal Code "${sku}" — leave it blank to add this as a new product`);
       } else {
         action = "update";
         const otherSku = nameCatKeys.get(nameCatKey);
         if (otherSku && otherSku.toLowerCase() !== sku.toLowerCase()) {
-          errors.push("Product Name + Category already used by another Internal Code");
+          errors.push(`This Product Name + Category is already used by Internal Code "${otherSku}" — check for a typo`);
         }
       }
     } else {
       const clash = nameCatKeys.get(nameCatKey);
       if (clash) {
         errors.push(
-          `Product Name + Category already exists (Internal Code ${clash}) — set Internal Code to update`,
+          `A product with this Name + Category already exists (Internal Code "${clash}") — fill in Internal Code to update it instead`,
         );
       }
       sku = `UN-${categoryCode(row.category || "XX")}-${String(createSeq).padStart(4, "0")}`;
@@ -199,8 +199,9 @@ export function validateImportRows(
     ) {
       priceFloorViolation = true;
       if (!allowFloor) {
+        const floor = row.costPrice * (1 + minMarginPct / 100);
         errors.push(
-          `Price floor violated: Retail must be ≥ Cost × (1 + ${minMarginPct}% margin)`,
+          `Retail Price is too low — needs to be at least ${floor.toFixed(2)} for this product's ${minMarginPct}% minimum margin`,
         );
       }
     }

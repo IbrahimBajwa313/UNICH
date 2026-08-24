@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     if (access !== null && isAuthResponse(access)) return access;
 
     await connectDB();
-    const buffer = buildTemplateWorkbook();
+    const buffer = await buildTemplateWorkbook();
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {

@@ -16,7 +16,7 @@ export async function GET(req: Request) {
     await connectDB();
     const products = await Product.find().sort({ name: 1 });
     const list = toJSONList(products) as ProductType[];
-    const buffer = buildCatalogueExport(list);
+    const buffer = await buildCatalogueExport(list);
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
