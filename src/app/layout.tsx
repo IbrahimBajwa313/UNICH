@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { InlineScript } from "@/components/InlineScript";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/components/theme/ThemeProvider";
 import "./globals.css";
 
@@ -25,7 +26,7 @@ export default function RootLayout({
     <html lang="en" className={`${display.variable} h-full`} suppressHydrationWarning>
       <head>
         {/* Sets data-theme before first paint so a stored "light" preference doesn't flash dark. */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <InlineScript html={THEME_INIT_SCRIPT} />
       </head>
       <body className="min-h-full font-sans antialiased" suppressHydrationWarning>
         <ThemeProvider>{children}</ThemeProvider>

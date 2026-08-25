@@ -5,7 +5,7 @@ import { toJSON, toJSONList } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 import { recordAudit } from "@/lib/audit/log";
 
-function mapExpense(e: Record<string, unknown>) {
+export function mapExpense(e: Record<string, unknown>) {
   return {
     ...e,
     date: e.date ? new Date(e.date as string).toISOString().slice(0, 10) : null,

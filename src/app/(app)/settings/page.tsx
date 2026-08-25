@@ -458,12 +458,12 @@ function EditableRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-line/50 pb-2 last:border-0">
-      <dt className="text-ink-muted">{label}</dt>
-      <dd>
+      <dt className="shrink-0 text-ink-muted">{label}</dt>
+      <dd className="min-w-0 flex-1">
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-40 border-b border-line bg-transparent text-right font-medium text-ink outline-none focus:border-gold"
+          className="w-full border-b border-line bg-transparent text-right font-medium text-ink outline-none focus:border-gold"
         />
       </dd>
     </div>

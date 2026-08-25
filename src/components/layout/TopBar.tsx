@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Moon, Sun, Wifi } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
@@ -37,6 +38,15 @@ export function TopBar({ title }: { title?: string }) {
   const pageTitle = resolvePageTitle(pathname, title);
   const { theme, toggleTheme } = useTheme();
 
+  // ThemeProvider's initial state reads document.documentElement on mount,
+  // which the blocking inline script may have already corrected to "light"
+  // client-side — but SSR always assumes "dark" (no `document`). Render the
+  // SSR-safe "dark" version until after mount so hydration always matches;
+  // the real theme (if different) appears a frame later.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const resolvedTheme = mounted ? theme : "dark";
+
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line/70 bg-canvas/80 px-6 backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
@@ -59,10 +69,10 @@ export function TopBar({ title }: { title?: string }) {
           type="button"
           onClick={toggleTheme}
           className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-paper text-ink-muted transition hover:border-gold/40 hover:text-ink"
-          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
         <NotificationBell />
       </div>

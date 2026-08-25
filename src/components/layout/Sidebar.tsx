@@ -177,7 +177,7 @@ function NavItem({
     <Link
       href={href}
       className={clsx(
-        "animate-slide-in flex items-center gap-2.5 rounded-full px-3 py-2 text-sm font-medium whitespace-nowrap transition-all",
+        "animate-slide-in flex items-center gap-2.5 rounded-full px-3 py-2 text-sm font-semibold whitespace-nowrap transition-all",
         active
           ? "bg-ink text-canvas shadow-[0_4px_20px_rgb(245_245_247_/_12%)]"
           : "text-ink-muted hover:bg-sidebar-hover hover:text-ink",

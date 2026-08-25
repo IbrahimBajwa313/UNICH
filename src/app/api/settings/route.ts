@@ -6,7 +6,7 @@ import { invalidateReceiptSettingsCache } from "@/lib/receipt/server";
 import { toJSON } from "@/lib/serialize";
 import { isAuthResponse, requireApiAccess, safeErrorMessage } from "@/lib/auth/apiGuard";
 
-function normalizeSalespeople(value: unknown, fallbackName?: string) {
+export function normalizeSalespeople(value: unknown, fallbackName?: string) {
   const list = Array.isArray(value)
     ? value
     : typeof value === "string"
@@ -24,7 +24,7 @@ function normalizeSalespeople(value: unknown, fallbackName?: string) {
   return fallback ? [fallback] : ["Ahmad Ibrahim"];
 }
 
-function normalizeActiveSalesperson(
+export function normalizeActiveSalesperson(
   value: unknown,
   salespeople: string[],
   fallbackName?: string,
