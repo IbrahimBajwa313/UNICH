@@ -11,7 +11,11 @@ import {
   formatQuotationSms,
 } from "@/lib/notifications/whatsapp";
 import { buildReceiptDoc } from "@/lib/receipt/document";
-import { loadReceiptSettings, receiptDocForSale } from "@/lib/receipt/server";
+import {
+  loadReceiptSettings,
+  receiptDocForSale,
+  type ReceiptSettings,
+} from "@/lib/receipt/server";
 import { renderReceiptHtml } from "@/lib/receipt/template";
 import { receiptSmsText, receiptText } from "@/lib/receipt/text";
 import type { ReceiptLine } from "@/lib/receipt/types";
@@ -122,6 +126,11 @@ export async function POST(req: Request) {
     const needsNameLookup = !customerName && Boolean(toPhone);
     const shouldPersistEmail = Boolean(toEmail && toPhone);
 
+    // Kick this off alongside the customer lookup below instead of after it —
+    // the two are independent DB round-trips and don't need to be sequential.
+    const settingsPromise =
+      kind === "receipt" ? loadReceiptSettings() : null;
+
     // Only hit Customer when we actually need data from it.
     if (needsEmailLookup || needsNameLookup || shouldPersistEmail) {
       await connectDB();
@@ -148,6 +157,7 @@ export async function POST(req: Request) {
       toPhone,
       toEmail,
       customerName,
+      settings: settingsPromise ? await settingsPromise : undefined,
     });
 
     const jobs: Promise<void>[] = [];
@@ -257,6 +267,7 @@ async function buildContent(input: {
   toPhone: string;
   toEmail: string;
   customerName: string;
+  settings?: ReceiptSettings;
 }): Promise<{
   subject: string;
   text: string;
@@ -269,7 +280,7 @@ async function buildContent(input: {
   const wantsHtml = channels.includes("email") && !override;
 
   if (kind === "receipt") {
-    const settings = await loadReceiptSettings();
+    const settings = input.settings ?? (await loadReceiptSettings());
     // Prefer client-provided lines — avoids a Sale.findById round-trip (~0.5–2s on Atlas).
     const hasClientLines = Array.isArray(body.lines) && body.lines.length > 0;
     const doc = hasClientLines

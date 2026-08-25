@@ -18,6 +18,28 @@ function getResend(apiKey: string): Resend {
   return resendClient;
 }
 
+/** Hard cap so a stalled Resend call can never hold the send flow open indefinitely. */
+const EMAIL_SEND_TIMEOUT_MS = 5000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export async function sendEmail(
   input: SendEmailInput,
 ): Promise<SendEmailResult> {
@@ -36,15 +58,19 @@ export async function sendEmail(
   }
 
   try {
-    const { data, error } = await getResend(apiKey).emails.send({
-      from,
-      to: input.to.trim(),
-      subject: input.subject,
-      text: input.text,
-      html:
-        input.html ||
-        `<pre style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(input.text)}</pre>`,
-    });
+    const { data, error } = await withTimeout(
+      getResend(apiKey).emails.send({
+        from,
+        to: input.to.trim(),
+        subject: input.subject,
+        text: input.text,
+        html:
+          input.html ||
+          `<pre style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(input.text)}</pre>`,
+      }),
+      EMAIL_SEND_TIMEOUT_MS,
+      "Email send",
+    );
 
     if (error) {
       return { ok: false, error: error.message };
