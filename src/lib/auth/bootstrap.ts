@@ -27,7 +27,7 @@ export async function ensureAuthBootstrap(): Promise<void> {
     if (!branch) {
       branch = (
         await Branch.create({
-          name: "Main Store — Dubai",
+          name: "Main Store — Muscat",
           code: "MAIN",
           active: true,
         })

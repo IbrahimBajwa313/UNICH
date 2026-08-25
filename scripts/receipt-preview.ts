@@ -5,12 +5,12 @@ import { receiptSmsText, receiptText } from "../src/lib/receipt/text";
 
 /** Renders sample receipts to /tmp so the print layouts can be eyeballed without a sale. */
 const settings = {
-  branchName: "Main Store — Dubai",
-  currency: "AED",
+  branchName: "Main Store — Muscat",
+  currency: "OMR",
   invoiceLanguages: "English + Arabic",
   storeLegalName: "UNICH Perfumes LLC",
-  storeAddress: "Shop 12, Gold Souk Extension, Deira — Dubai, UAE",
-  storePhone: "+971 4 000 0000",
+  storeAddress: "Shop 12, Muttrah Souk — Muscat, Oman",
+  storePhone: "+968 24 000 000",
   storeTaxNumber: "100123456700003",
   receiptFooter: "Thank you for shopping with UNICH · Exchange within 7 days.",
   vatPercent: 5,

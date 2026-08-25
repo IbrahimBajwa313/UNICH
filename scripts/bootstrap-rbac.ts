@@ -104,7 +104,7 @@ async function main() {
   let branch = await Branch.findOne({ code: "MAIN" });
   if (!branch) {
     branch = await Branch.create({
-      name: "Main Store — Dubai",
+      name: "Main Store — Muscat",
       code: "MAIN",
       active: true,
     });

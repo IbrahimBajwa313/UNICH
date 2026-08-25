@@ -40,6 +40,7 @@ import {
   printSaleReceipt,
 } from "@/lib/receipt/print";
 import { receiptText } from "@/lib/receipt/text";
+import { renderReceiptHtml } from "@/lib/receipt/template";
 import type { ReceiptFormat, ReceiptLine } from "@/lib/receipt/types";
 import { OIL_BASE_PRODUCT_ID, matchRemixRole } from "@/lib/sales/constants";
 import type {
@@ -1226,7 +1227,20 @@ function PosPageInner() {
   ) {
     setReceiptBusy(`print-${format}`);
     try {
-      await printSaleReceipt(sale.id, format, { reprint });
+      // Everything the receipt needs is already in memory (this sale + the
+      // settings the page loaded on mount) — render locally instead of an
+      // API round-trip, so the print dialog opens immediately.
+      const doc = buildReceiptDoc({
+        saleId: sale.id,
+        reprint,
+        customer: { name: sale.customerName, phone: sale.phone, email: sale.email },
+        salesperson: sale.salesperson,
+        payment: sale.payment,
+        lines: sale.lines,
+        total: sale.total,
+        settings: settings.data ?? undefined,
+      });
+      await printHtmlDocument(renderReceiptHtml(doc, format));
       void api("/api/notifications/log", {
         method: "POST",
         body: JSON.stringify({

@@ -1237,8 +1237,8 @@ async function seed() {
 
   await AppSettings.create({
     key: "default",
-    branchName: "Main Store — Dubai",
-    currency: "AED",
+    branchName: "Main Store — Muscat",
+    currency: "OMR",
     uiLanguage: "English",
     invoiceLanguages: "English + Arabic",
     qtyPrecision: 3,
@@ -1247,8 +1247,8 @@ async function seed() {
     fridayHours: "16:30 – 22:00",
     minMarginGuard: "Admin password required",
     storeLegalName: "UNICH Perfumes LLC",
-    storeAddress: "Shop 12, Gold Souk Extension, Deira — Dubai, UAE",
-    storePhone: "+971 4 000 0000",
+    storeAddress: "Shop 12, Muttrah Souk — Muscat, Oman",
+    storePhone: "+968 24 000 000",
     storeTaxNumber: "",
     receiptLogoUrl: "",
     receiptFooter: "Thank you for shopping with UNICH · Exchange within 7 days with receipt.",
@@ -1283,7 +1283,7 @@ async function seed() {
 
   // BRN-08: default branch + role accounts (from .env)
   const mainBranch = await Branch.create({
-    name: "Main Store — Dubai",
+    name: "Main Store — Muscat",
     code: "MAIN",
     active: true,
   });

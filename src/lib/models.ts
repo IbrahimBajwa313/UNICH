@@ -524,7 +524,7 @@ const ExpenseSchema = new Schema(
 const AppSettingsSchema = new Schema(
   {
     key: { type: String, required: true, unique: true },
-    branchName: { type: String, default: "Main Store — Dubai" },
+    branchName: { type: String, default: "Main Store — Muscat" },
     currency: { type: String, default: "OMR" },
     uiLanguage: { type: String, default: "English" },
     invoiceLanguages: { type: String, default: "English + Arabic" },
