@@ -130,6 +130,48 @@ body {
   z-index: 1;
 }
 
+@keyframes cta-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 8px 24px rgb(123 97 255 / 35%),
+      0 0 0 0 rgb(123 97 255 / 45%);
+  }
+  50% {
+    box-shadow:
+      0 10px 30px rgb(123 97 255 / 55%),
+      0 0 0 6px rgb(123 97 255 / 14%);
+  }
+}
+
+.cta-glow {
+  box-shadow: 0 8px 24px rgb(123 97 255 / 35%);
+  animation: cta-pulse 2.4s ease-in-out infinite;
+}
+
+.cta-glow:disabled {
+  animation: none;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .cta-glow {
+  animation-name: cta-pulse-light;
+}
+
+@keyframes cta-pulse-light {
+  0%,
+  100% {
+    box-shadow:
+      0 6px 18px rgb(109 84 230 / 30%),
+      0 0 0 0 rgb(109 84 230 / 35%);
+  }
+  50% {
+    box-shadow:
+      0 8px 24px rgb(109 84 230 / 45%),
+      0 0 0 6px rgb(109 84 230 / 16%);
+  }
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;

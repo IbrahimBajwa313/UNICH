@@ -2176,7 +2176,7 @@ function PosPageInner() {
             </label>
 
             <Button
-              className="mt-2 w-full"
+              className="cta-glow mt-2 w-full"
               variant="gold"
               disabled={
                 quotationMode
