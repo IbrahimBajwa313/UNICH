@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell, Check } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { api } from "@/lib/api";
@@ -8,6 +9,7 @@ import { clsx } from "@/lib/format";
 
 type NotificationItem = {
   id: string;
+  dedupeKey: string;
   type: string;
   title: string;
   detail: string;
@@ -24,7 +26,32 @@ function badgeTone(severity: NotificationItem["severity"]) {
   return "info" as const;
 }
 
+/**
+ * Where clicking a notification should take you. `dedupeKey` is built in
+ * `buildAlerts` (src/lib/notifications/alerts.ts) — `low-`/`dead-` prefixes
+ * carry a product id, but the Low Stock / Inventory pages don't yet support
+ * deep-linking to one product, so those land on the relevant list page.
+ * Report-shaped alerts deep-link into the Reports catalog via `?report=`.
+ */
+function resolveHref(n: NotificationItem): string | null {
+  switch (n.type) {
+    case "low_stock":
+      return "/inventory/low-stock";
+    case "dead_stock":
+      return "/inventory";
+    case "report":
+      return "/reports";
+    case "receivables":
+      return "/reports?report=customers-credit-follow-up";
+    case "payables":
+      return "/reports?report=purchases-by-supplier";
+    default:
+      return null;
+  }
+}
+
 export function NotificationBell() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -132,31 +159,41 @@ export function NotificationBell() {
                 No notifications — all clear.
               </li>
             ) : (
-              items.map((n) => (
-                <li
-                  key={n.id}
-                  onClick={() => !n.read && void markRead(n.id)}
-                  className={clsx(
-                    "cursor-pointer border-b border-line/50 px-3 py-2.5 transition last:border-b-0 hover:bg-mist/60",
-                    !n.read && "bg-mist/40",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p
-                      className={clsx(
-                        "text-xs",
-                        n.read ? "text-ink-muted" : "font-medium text-ink",
-                      )}
-                    >
-                      {n.title}
-                    </p>
-                    <Badge tone={badgeTone(n.severity)} className="shrink-0">
-                      {n.severity}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-[11px] text-ink-muted">{n.detail}</p>
-                </li>
-              ))
+              items.map((n) => {
+                const href = resolveHref(n);
+                return (
+                  <li
+                    key={n.id}
+                    onClick={() => {
+                      if (!n.read) void markRead(n.id);
+                      if (href) {
+                        setOpen(false);
+                        router.push(href);
+                      }
+                    }}
+                    title={href ? "Open" : undefined}
+                    className={clsx(
+                      "cursor-pointer border-b border-line/50 px-3 py-2.5 transition last:border-b-0 hover:bg-mist/60",
+                      !n.read && "bg-mist/40",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p
+                        className={clsx(
+                          "text-xs",
+                          n.read ? "text-ink-muted" : "font-medium text-ink",
+                        )}
+                      >
+                        {n.title}
+                      </p>
+                      <Badge tone={badgeTone(n.severity)} className="shrink-0">
+                        {n.severity}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-[11px] text-ink-muted">{n.detail}</p>
+                  </li>
+                );
+              })
             )}
           </ul>
         </div>

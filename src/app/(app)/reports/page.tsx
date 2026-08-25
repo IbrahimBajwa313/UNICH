@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { Download, FileText, PauseCircle } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -117,7 +117,9 @@ export default function ReportsPage() {
           onExport={() => void exportReport("held", heldPeriod, heldDate)}
         />
 
-        <ReportCenter />
+        <Suspense fallback={null}>
+          <ReportCenter />
+        </Suspense>
       </div>
     </div>
   );

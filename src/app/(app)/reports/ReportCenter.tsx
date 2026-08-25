@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState";
@@ -79,7 +80,10 @@ export function ReportCenter() {
   const catalog = useApiData<{ reports: ReportCatalogEntry[] }>("/api/reports/engine");
   const branchesData = useApiData<Branch[]>("/api/branches");
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    searchParams.get("report"),
+  );
   const [period, setPeriod] = useState<ReportPeriod>("daily");
   const [date, setDate] = useState(() => toDateInputValue(new Date()));
   const [branchId, setBranchId] = useState("");
@@ -167,9 +171,9 @@ export function ReportCenter() {
                         onClick={() => setSelectedId(r.id)}
                         title={r.description}
                         className={clsx(
-                          "block w-full rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                          "block w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors",
                           effectiveId === r.id
-                            ? "bg-gold/15 font-medium text-ink"
+                            ? "bg-gold/15 text-ink"
                             : "text-ink-muted hover:bg-mist",
                         )}
                       >
