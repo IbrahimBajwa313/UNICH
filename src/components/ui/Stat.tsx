@@ -46,7 +46,7 @@ export function Stat({
             {trend}
           </span>
         ) : null}
-        {hint ? <span className="text-ink-muted">{hint}</span> : null}
+        {hint ? <span className="font-medium text-ink-muted">{hint}</span> : null}
       </div>
     </div>
   );

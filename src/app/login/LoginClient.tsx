@@ -177,7 +177,7 @@ export default function LoginClient() {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse 70% 50% at 50% 0%, rgb(123 97 255 / 12%), transparent 60%)",
+            "radial-gradient(ellipse 70% 50% at 50% 0%, color-mix(in srgb, var(--gold) 12%, transparent), transparent 60%)",
         }}
       />
       <div className="relative z-10 w-full max-w-md rounded-2xl border border-line bg-paper p-8 shadow-sm">
@@ -186,7 +186,7 @@ export default function LoginClient() {
             className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold text-white"
             style={{
               background:
-                "linear-gradient(135deg, #9b87ff 0%, #7b61ff 55%, #f5f5f7 140%)",
+                "linear-gradient(135deg, var(--gold-soft) 0%, var(--gold) 55%, var(--ink) 140%)",
             }}
           >
             U

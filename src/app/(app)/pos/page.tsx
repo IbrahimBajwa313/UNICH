@@ -1554,7 +1554,7 @@ function PosPageInner() {
                               ? "Out"
                               : `${p.stockSellable} ${p.unit}`}
                           </Badge>
-                          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-ink">
+                          <span className="shrink-0 text-sm font-bold tabular-nums text-ink">
                             {formatMoney(p.sellPrice)}
                             {p.unit === "ml" ? (
                               <span className="font-normal text-ink-muted">
@@ -1563,10 +1563,10 @@ function PosPageInner() {
                             ) : null}
                           </span>
                         </div>
-                        <p className="line-clamp-2 text-sm font-medium leading-snug text-ink">
+                        <p className="line-clamp-2 text-base font-semibold leading-snug text-ink">
                           {p.name}
                         </p>
-                        <p className="mt-0.5 truncate text-[10px] text-ink-muted">
+                        <p className="mt-0.5 truncate text-xs text-ink-muted">
                           {p.sku} · {p.category}
                         </p>
                         <div className="mt-auto flex gap-1.5 pt-3">
@@ -1594,7 +1594,7 @@ function PosPageInner() {
                               </Button>
                               <Button
                                 size="sm"
-                                variant="primary"
+                                variant="gold"
                                 className="h-8 flex-1 px-0"
                                 disabled={out}
                                 title={out ? "Out of stock" : "1 tola"}
@@ -1606,6 +1606,7 @@ function PosPageInner() {
                           ) : (
                             <Button
                               size="sm"
+                              variant="gold"
                               className="h-8 w-full"
                               disabled={out}
                               title={out ? "Out of stock" : undefined}
@@ -1741,7 +1742,7 @@ function PosPageInner() {
           <div className="shrink-0">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <h2 className="font-semibold text-lg text-ink">
+                <h2 className="font-bold text-xl text-ink">
                   {quotationMode ? `Converting ${quotationMode.number}` : "Current Bill"}
                 </h2>
                 <p className="text-[11px] text-ink-muted">
@@ -1995,15 +1996,15 @@ function PosPageInner() {
                   className="rounded-lg border border-line/70 bg-mist/30 px-3 py-2"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{line.name}</p>
-                    <p className="text-[11px] text-ink-muted">
+                    <p className="truncate text-base font-semibold">{line.name}</p>
+                    <p className="text-xs text-ink-muted">
                       {line.unitLabel} · {line.lineType}
                       {line.formulaName ? ` · ${line.formulaName}` : ""}
                     </p>
                   </div>
                   <div className="mt-1.5 flex items-center justify-between">
-                    <span className="text-sm font-medium">{line.qty} ×</span>
-                    <p className="text-sm font-semibold">
+                    <span className="text-sm font-semibold">{line.qty} ×</span>
+                    <p className="text-base font-bold">
                       {formatMoney(line.qty * line.unitPrice)}
                     </p>
                   </div>
@@ -2021,10 +2022,10 @@ function PosPageInner() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
+                      <p className="truncate text-base font-semibold">
                         {line.product.name}
                       </p>
-                      <p className="text-[11px] text-ink-muted">
+                      <p className="text-xs text-ink-muted">
                         {line.unitLabel} · {line.lineType}
                         {line.formulaName
                           ? ` · ${line.formulaName}`
@@ -2055,7 +2056,7 @@ function PosPageInner() {
                       >
                         <Minus className="h-3 w-3" />
                       </button>
-                      <span className="w-8 text-center text-sm font-medium">
+                      <span className="w-8 text-center text-sm font-semibold">
                         {line.qty}
                       </span>
                       <button
@@ -2066,7 +2067,7 @@ function PosPageInner() {
                         <Plus className="h-3 w-3" />
                       </button>
                     </div>
-                    <p className="text-sm font-semibold">
+                    <p className="text-base font-bold">
                       {formatMoney(line.qty * line.unitPrice)}
                     </p>
                   </div>
@@ -2104,8 +2105,8 @@ function PosPageInner() {
                 )}
               </div>
               <div className="text-right">
-                <p className="text-[11px] text-ink-muted">Total</p>
-                <p className="font-semibold text-xl tabular-nums leading-none">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Total</p>
+                <p className="font-bold text-3xl tabular-nums leading-none text-ink">
                   {formatMoney(quotationMode ? quotationMode.total : subtotal)}
                 </p>
               </div>
@@ -2117,7 +2118,7 @@ function PosPageInner() {
                   key={p.id}
                   type="button"
                   onClick={() => setPayment(p.id)}
-                  className={`flex min-h-10 flex-col items-center justify-center gap-0.5 rounded-lg border px-0.5 py-1 text-[9px] font-medium transition ${
+                  className={`flex min-h-10 flex-col items-center justify-center gap-0.5 rounded-lg border px-0.5 py-1 text-[10px] font-semibold transition ${
                     payment === p.id
                       ? "border-ink bg-ink text-canvas"
                       : "border-line bg-mist text-ink-muted hover:border-line-strong"

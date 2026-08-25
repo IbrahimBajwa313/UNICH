@@ -71,17 +71,19 @@ export function Sidebar() {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse 90% 45% at 0% 0%, rgb(123 97 255 / 14%), transparent 55%)",
+            "radial-gradient(ellipse 90% 45% at 0% 0%, color-mix(in srgb, var(--gold) 14%, transparent), transparent 55%)",
         }}
       />
       <div className="relative z-10 flex h-full flex-col">
         <div className="border-b border-line/50 px-5 py-5">
           <Link href="/" className="group flex items-center gap-3">
             <span
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-[0_0_20px_rgb(123_97_255_/_35%)]"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
               style={{
                 background:
-                  "linear-gradient(135deg, #9b87ff 0%, #7b61ff 55%, #f5f5f7 140%)",
+                  "linear-gradient(135deg, var(--gold-soft) 0%, var(--gold) 55%, var(--ink) 140%)",
+                boxShadow:
+                  "0 0 20px color-mix(in srgb, var(--gold) 35%, transparent)",
               }}
             >
               U
@@ -175,9 +177,9 @@ function NavItem({
     <Link
       href={href}
       className={clsx(
-        "animate-slide-in flex items-center gap-2.5 rounded-full px-3 py-2 text-sm whitespace-nowrap transition-all",
+        "animate-slide-in flex items-center gap-2.5 rounded-full px-3 py-2 text-sm font-medium whitespace-nowrap transition-all",
         active
-          ? "bg-ink font-medium text-canvas shadow-[0_4px_20px_rgb(245_245_247_/_12%)]"
+          ? "bg-ink text-canvas shadow-[0_4px_20px_rgb(245_245_247_/_12%)]"
           : "text-ink-muted hover:bg-sidebar-hover hover:text-ink",
       )}
     >
