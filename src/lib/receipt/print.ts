@@ -34,6 +34,17 @@ export function printHtmlDocument(html: string): Promise<void> {
         finish(new Error("Print frame could not be created"));
         return;
       }
+      // Chromium doesn't reliably shrink `@page { size: 80mm auto }` to the
+      // content — it falls back to a full Letter/A4-length page, leaving a
+      // large blank strip below the receipt. Measuring the rendered content
+      // and pinning an explicit page height (which browsers DO honor) fixes it.
+      if (win.document.body?.classList.contains("thermal")) {
+        const contentPx = win.document.documentElement.scrollHeight;
+        const contentMm = Math.ceil((contentPx * 25.4) / 96) + 6; // + 3mm top/bottom @page margin
+        const style = win.document.createElement("style");
+        style.textContent = `@page { size: 80mm ${contentMm}mm; }`;
+        win.document.head.appendChild(style);
+      }
       win.onafterprint = () => finish();
       try {
         win.focus();

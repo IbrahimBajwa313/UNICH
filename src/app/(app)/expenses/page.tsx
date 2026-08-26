@@ -89,9 +89,9 @@ export default function ExpensesPage() {
           <tbody>
             {rows.map((e) => (
               <tr key={e.id} className="border-t border-line/60">
-                <td className="px-5 py-3 text-ink-muted">{e.date}</td>
+                <td className="px-5 py-3 font-medium text-ink-muted">{e.date}</td>
                 <td className="px-3 py-3 font-medium">{e.category}</td>
-                <td className="px-3 py-3 text-ink-muted">{e.detail}</td>
+                <td className="px-3 py-3 font-medium text-ink-muted">{e.detail}</td>
                 <td className="px-3 py-3">
                   <Badge tone={e.status === "approved" ? "success" : "warning"}>
                     {e.status}

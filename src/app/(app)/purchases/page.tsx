@@ -528,7 +528,7 @@ function Field({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm"
+        className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/20"
       />
     </label>
   );
