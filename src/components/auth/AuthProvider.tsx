@@ -23,6 +23,11 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// Cookie-signed session — no DB round-trip; should be well under 3s.
+function fetchSession(signal: AbortSignal): Promise<AuthMe> {
+  return api<AuthMe>("/api/auth/me", { signal });
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -33,10 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 3000);
     try {
-      // Cookie-signed session — no DB round-trip; should be well under 3s.
-      const me = await api<AuthMe>("/api/auth/me", {
-        signal: controller.signal,
-      });
+      const me = await fetchSession(controller.signal);
       setAuthenticated(Boolean(me.authenticated && me.user));
       setUser(me.user);
       setPermissions(me.permissions || []);
@@ -51,8 +53,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let ignore = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 3000);
+
+    async function load() {
+      try {
+        const me = await fetchSession(controller.signal);
+        if (ignore) return;
+        setAuthenticated(Boolean(me.authenticated && me.user));
+        setUser(me.user);
+        setPermissions(me.permissions || []);
+      } catch {
+        if (ignore) return;
+        setAuthenticated(false);
+        setUser(null);
+        setPermissions([]);
+      } finally {
+        window.clearTimeout(timer);
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      ignore = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const logout = useCallback(async () => {
     try {
