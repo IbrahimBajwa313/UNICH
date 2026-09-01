@@ -115,6 +115,7 @@ export async function POST(req: Request) {
       customerId: body.customerId,
       salesperson: body.salesperson,
       payment: body.payment,
+      paymentBreakdown: body.paymentBreakdown,
       lines: body.lines,
       status: body.status,
       idempotencyKey: body.idempotencyKey || headerKey,

@@ -33,7 +33,7 @@ import { ErrorState, LoadingState, useApiData } from "@/components/ui/DataState"
 import { api } from "@/lib/api";
 import { formatMoney, tolaToMl } from "@/lib/format";
 import { buildWhatsAppUrl } from "@/lib/notifications/whatsapp";
-import { buildReceiptDoc } from "@/lib/receipt/document";
+import { buildReceiptDoc, formatPaymentLabel } from "@/lib/receipt/document";
 import {
   fetchReceiptHtml,
   printHtmlDocument,
@@ -48,6 +48,7 @@ import type {
   Customer,
   Formula,
   PaymentMethod,
+  PaymentSplit,
   Product,
   Quotation,
 } from "@/lib/types";
@@ -90,6 +91,7 @@ type HeldSale = {
   customerName?: string;
   salesperson: string;
   payment: string;
+  paymentBreakdown?: PaymentSplit[];
   status: string;
   total: number;
   saleType?: string;
@@ -107,6 +109,7 @@ type LastSale = {
   phone: string;
   email: string;
   payment: string;
+  paymentBreakdown?: PaymentSplit[];
   salesperson: string;
   lines: ReceiptLine[];
 };
@@ -178,6 +181,21 @@ const payments: { id: PaymentMethod; label: string; icon: React.ReactNode }[] = 
   { id: "mixed", label: "Mixed", icon: <Shuffle className="h-4 w-4" /> },
 ];
 
+/** The methods a "Mixed" bill can be split across — every payment button except Mixed itself. */
+const MIXED_METHODS: { id: PaymentSplit["method"]; label: string; icon: React.ReactNode }[] = [
+  { id: "cash", label: "Cash", icon: <Banknote className="h-4 w-4" /> },
+  { id: "card", label: "Card", icon: <CreditCard className="h-4 w-4" /> },
+  { id: "bank", label: "Bank", icon: <Landmark className="h-4 w-4" /> },
+  { id: "credit", label: "Credit", icon: <FileClock className="h-4 w-4" /> },
+];
+
+const emptyMixedAmounts: Record<PaymentSplit["method"], string> = {
+  cash: "",
+  card: "",
+  bank: "",
+  credit: "",
+};
+
 const emptyHeld: HeldSale[] = [];
 
 function normalizePayment(value: string | undefined): PaymentMethod {
@@ -231,6 +249,8 @@ function PosPageInner() {
   const [toolStrip, setToolStrip] = useState<"packaging" | "quick">("quick");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [payment, setPayment] = useState<PaymentMethod>("cash");
+  const [mixedOpen, setMixedOpen] = useState(false);
+  const [mixedAmounts, setMixedAmounts] = useState(emptyMixedAmounts);
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -481,6 +501,14 @@ function PosPageInner() {
     vatPercent > 0 ? round2(subtotal - subtotal / (1 + vatPercent / 100)) : 0;
   const netAmount = round2(subtotal - vatAmount);
   const itemCount = cart.reduce((s, l) => s + l.qty, 0);
+  const billTotal = quotationMode ? quotationMode.total : subtotal;
+  const mixedBreakdown: PaymentSplit[] = MIXED_METHODS.map((m) => ({
+    method: m.id,
+    amount: round2(Number(mixedAmounts[m.id]) || 0),
+  })).filter((e) => e.amount > 0);
+  const mixedEntered = round2(mixedBreakdown.reduce((s, e) => s + e.amount, 0));
+  const mixedRemaining = round2(billTotal - mixedEntered);
+  const mixedBalanced = mixedBreakdown.length > 0 && Math.abs(mixedRemaining) < 0.005;
 
   useEffect(() => {
     const timer = window.setTimeout(() => searchRef.current?.focus(), 80);
@@ -884,6 +912,11 @@ function PosPageInner() {
       flash("Refill accepts only 100ml customer bottles (BLD-09)", 6000, "err");
       return;
     }
+    if (payment === "mixed" && !mixedBalanced) {
+      flash("Split payment doesn't add up to the bill total yet", 6000, "err");
+      setMixedOpen(true);
+      return;
+    }
     setCheckingOut(true);
     const idempotencyKey = createIdempotencyKey();
     const snapshot = {
@@ -893,6 +926,7 @@ function PosPageInner() {
       phone: phone.trim(),
       email: email.trim(),
       payment,
+      paymentBreakdown: payment === "mixed" ? mixedBreakdown : undefined,
       salesperson,
       subtotal,
       matchedCustomerId,
@@ -916,6 +950,7 @@ function PosPageInner() {
           customerId: snapshot.matchedCustomerId || undefined,
           salesperson: snapshot.salesperson,
           payment: snapshot.payment,
+          paymentBreakdown: snapshot.paymentBreakdown,
           idempotencyKey,
           lines: snapshot.cart.map((line) => ({
             productId: line.product.id,
@@ -938,6 +973,7 @@ function PosPageInner() {
         phone: snapshot.phone,
         email: snapshot.email,
         payment: snapshot.payment,
+        paymentBreakdown: snapshot.paymentBreakdown,
         salesperson: snapshot.salesperson,
         lines: snapshot.cart.map((line) => ({
           name: line.product.name,
@@ -948,7 +984,11 @@ function PosPageInner() {
       };
       setLastSale(completed);
       setSaleDoneOpen(true);
-      flash(`Sale completed · ${formatMoney(snapshot.subtotal)} · ${snapshot.payment}`);
+      flash(
+        `Sale completed · ${formatMoney(snapshot.subtotal)} · ${formatPaymentLabel(snapshot.payment, snapshot.paymentBreakdown)}`,
+      );
+      // Split amounts are specific to this bill — clear them for the next customer.
+      if (snapshot.payment === "mixed") setMixedAmounts(emptyMixedAmounts);
       // Soft stock refresh — silent so POS does not flash "Loading…"
       applyLocalStockDeduction(snapshot.cart);
       void reloadHeld({ silent: true });
@@ -1088,6 +1128,7 @@ function PosPageInner() {
       customerName: customerName.trim(),
       phone: phone.trim(),
       payment,
+      paymentBreakdown: payment === "mixed" ? mixedBreakdown : undefined,
       salesperson,
       email,
       cart,
@@ -1112,6 +1153,7 @@ function PosPageInner() {
           customerId: snapshot.matchedCustomerId || undefined,
           salesperson: snapshot.salesperson,
           payment: snapshot.payment,
+          paymentBreakdown: snapshot.paymentBreakdown,
           status: "held",
           lines: snapshot.cart.map((line) => ({
             productId: line.product.id,
@@ -1170,6 +1212,15 @@ function PosPageInner() {
         : "",
     );
     setPayment(normalizePayment(sale.payment));
+    if (sale.payment === "mixed" && Array.isArray(sale.paymentBreakdown)) {
+      const restored = { ...emptyMixedAmounts };
+      for (const entry of sale.paymentBreakdown) {
+        if (entry.method in restored) restored[entry.method] = String(entry.amount);
+      }
+      setMixedAmounts(restored);
+    } else {
+      setMixedAmounts(emptyMixedAmounts);
+    }
     setHeldBills((prev) => (prev ?? []).filter((s) => s.id !== sale.id));
     try {
       await api(`/api/sales/${sale.id}`, {
@@ -1235,7 +1286,7 @@ function PosPageInner() {
         reprint,
         customer: { name: sale.customerName, phone: sale.phone, email: sale.email },
         salesperson: sale.salesperson,
-        payment: sale.payment,
+        payment: formatPaymentLabel(sale.payment, sale.paymentBreakdown),
         lines: sale.lines,
         total: sale.total,
         settings: settings.data ?? undefined,
@@ -1280,7 +1331,7 @@ function PosPageInner() {
           customerName: customerName.trim(),
           customerPhone: phone.trim(),
           salesperson,
-          payment,
+          payment: formatPaymentLabel(payment, mixedBreakdown),
           total: subtotal,
           lines: receiptLines(),
         }),
@@ -1321,7 +1372,9 @@ function PosPageInner() {
         email: target ? target.email : email.trim(),
       },
       salesperson: target?.salesperson || salesperson,
-      payment: target ? target.payment : payment,
+      payment: target
+        ? formatPaymentLabel(target.payment, target.paymentBreakdown)
+        : formatPaymentLabel(payment, mixedBreakdown),
       lines,
       total: target ? target.total : subtotal,
       settings: settings.data ?? undefined,
@@ -2117,7 +2170,13 @@ function PosPageInner() {
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setPayment(p.id)}
+                  onClick={() => {
+                    if (p.id === "mixed") {
+                      setMixedOpen(true);
+                    } else {
+                      setPayment(p.id);
+                    }
+                  }}
                   className={`flex min-h-10 flex-col items-center justify-center gap-0.5 rounded-lg border px-0.5 py-1 text-[10px] font-semibold transition ${
                     payment === p.id
                       ? "border-ink bg-ink text-canvas"
@@ -2129,6 +2188,30 @@ function PosPageInner() {
                 </button>
               ))}
             </div>
+
+            {payment === "mixed" && mixedBreakdown.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setMixedOpen(true)}
+                className={`mt-1.5 flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[11px] ${
+                  mixedBalanced
+                    ? "border-line bg-mist/60 text-ink-muted"
+                    : "border-red-300 bg-red-50 text-red-700"
+                }`}
+              >
+                <span className="truncate">
+                  {mixedBreakdown
+                    .map(
+                      (e) =>
+                        `${e.method.charAt(0).toUpperCase()}${e.method.slice(1)} ${formatMoney(e.amount)}`,
+                    )
+                    .join(" + ")}
+                </span>
+                <span className="shrink-0 font-semibold underline">
+                  {mixedBalanced ? "Edit" : `${formatMoney(mixedRemaining)} left`}
+                </span>
+              </button>
+            ) : null}
 
             {!quotationMode ? (
               <Button
@@ -2196,7 +2279,10 @@ function PosPageInner() {
               disabled={
                 quotationMode
                   ? completingQuotation
-                  : cart.length === 0 || checkingOut || holding
+                  : cart.length === 0 ||
+                    checkingOut ||
+                    holding ||
+                    (payment === "mixed" && !mixedBalanced)
               }
               onClick={() => void (quotationMode ? completeQuotationSale() : checkout())}
             >
@@ -2310,6 +2396,91 @@ function PosPageInner() {
         </Panel>
       </div>
 
+      {mixedOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 sm:items-center"
+          onClick={() => setMixedOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setMixedOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mixed-payment-title"
+            className="animate-fade-up w-full max-w-sm rounded-2xl border border-line bg-canvas p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 id="mixed-payment-title" className="font-semibold text-lg text-ink">
+                  Split payment
+                </h3>
+                <p className="mt-0.5 text-sm text-ink-muted">
+                  Bill total {formatMoney(billTotal)} — cover it across a few methods, e.g. half
+                  cash, half credit.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMixedOpen(false)}
+                className="shrink-0 text-ink-muted hover:text-ink"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {MIXED_METHODS.map((m) => (
+                <div key={m.id} className="flex items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-mist text-ink-muted">
+                    {m.icon}
+                  </span>
+                  <span className="w-12 shrink-0 text-sm font-medium text-ink">{m.label}</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={mixedAmounts[m.id]}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9.]/g, "");
+                      setMixedAmounts((prev) => ({ ...prev, [m.id]: raw }));
+                    }}
+                    placeholder="0.000"
+                    className="h-9 flex-1 rounded-lg border border-line bg-mist px-2.5 text-right text-sm tabular-nums text-ink outline-none focus:border-line-strong"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-mist/70 px-3 py-2 text-sm">
+              <span className="text-ink-muted">
+                {mixedRemaining === 0 ? "Balanced" : mixedRemaining > 0 ? "Remaining" : "Over by"}
+              </span>
+              <span
+                className={`font-semibold tabular-nums ${
+                  Math.abs(mixedRemaining) < 0.005 ? "text-emerald-600" : "text-red-600"
+                }`}
+              >
+                {formatMoney(Math.abs(mixedRemaining))}
+              </span>
+            </div>
+
+            <Button
+              className="mt-4 w-full"
+              variant="gold"
+              disabled={!mixedBalanced}
+              onClick={() => {
+                setPayment("mixed");
+                setMixedOpen(false);
+              }}
+            >
+              Use this split
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {saleDoneOpen && lastSale ? (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 sm:items-center"
@@ -2337,7 +2508,8 @@ function PosPageInner() {
                   Sale complete
                 </h3>
                 <p className="mt-0.5 text-sm text-ink-muted">
-                  {formatMoney(lastSale.total)} · {lastSale.payment}
+                  {formatMoney(lastSale.total)} ·{" "}
+                  {formatPaymentLabel(lastSale.payment, lastSale.paymentBreakdown)}
                   {lastSale.customerName
                     ? ` · ${lastSale.customerName}`
                     : lastSale.phone
