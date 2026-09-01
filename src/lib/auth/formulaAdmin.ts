@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
+import { getSessionFromRequest } from "@/lib/auth/session";
 
 /** BLD-04: formula confidentiality — Admin-only recipe access. */
 export const FORMULA_ADMIN_COOKIE = "unich_formula_admin";
@@ -131,6 +132,17 @@ function cookieFromRequest(req: Request): string | null {
 export function getFormulaAdmin(req: Request): FormulaAdminSession | null {
   const fromCookie = parseFormulaAdminToken(cookieFromRequest(req));
   if (fromCookie) return fromCookie;
+
+  // Owner is already the app's top-level admin — don't re-prompt for the
+  // separate formula password on top of an owner-role app session.
+  const appSession = getSessionFromRequest(req);
+  if (appSession && appSession.role === "owner") {
+    return {
+      name: appSession.name || "Owner",
+      email: appSession.email,
+      exp: appSession.exp,
+    };
+  }
 
   const headerPassword =
     req.headers.get("x-formula-admin-password") ||

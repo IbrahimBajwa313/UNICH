@@ -216,6 +216,14 @@ const PurchaseOrderSchema = new Schema(
       default: "draft",
     },
     currency: { type: String, required: true, default: "OMR" },
+    /** Sum of line qty × unitCost, before VAT. */
+    subtotal: { type: Number, required: true, default: 0 },
+    /** PUR-VAT: VAT added on top of subtotal, editable per PO — 0 disables tax.
+     *  Schema default stays 0 so purchase orders saved before this field existed
+     *  don't get retroactively mislabeled as VAT-inclusive; the create form defaults to 5. */
+    vatPercent: { type: Number, required: true, default: 0 },
+    vatAmount: { type: Number, required: true, default: 0 },
+    /** subtotal + vatAmount — what's actually owed to the supplier. */
     total: { type: Number, required: true, default: 0 },
     itemCount: { type: Number, required: true, default: 0 },
     lines: { type: [PurchaseOrderLineSchema], default: [] },

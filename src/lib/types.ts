@@ -279,6 +279,9 @@ export interface PurchaseOrder {
   date: string;
   status: "draft" | "ordered" | "received" | "partial";
   currency: string;
+  subtotal: number;
+  vatPercent: number;
+  vatAmount: number;
   total: number;
   itemCount: number;
   lines: PurchaseOrderLine[];

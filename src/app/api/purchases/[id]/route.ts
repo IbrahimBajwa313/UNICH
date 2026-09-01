@@ -91,13 +91,26 @@ export async function PUT(req: Request, ctx: Ctx) {
         })
         .filter((l) => l.productId && l.qtyOrdered > 0);
       purchase.itemCount = purchase.lines.length;
-      purchase.total = purchase.lines.reduce(
+      purchase.subtotal = purchase.lines.reduce(
         (s: number, l: LineBody) => s + Number(l.qtyOrdered) * Number(l.unitCost),
         0,
       );
     } else {
-      if (body.total !== undefined) purchase.total = Number(body.total);
+      if (body.subtotal !== undefined) purchase.subtotal = Number(body.subtotal);
       if (body.itemCount !== undefined) purchase.itemCount = Number(body.itemCount);
+    }
+
+    if (body.vatPercent !== undefined) {
+      purchase.vatPercent = Math.max(0, Number(body.vatPercent));
+    }
+
+    // Recompute VAT + total whenever subtotal or vatPercent could have changed;
+    // otherwise allow a direct total override (e.g. manual correction with no line/VAT edits).
+    if (Array.isArray(body.lines) || body.vatPercent !== undefined || body.subtotal !== undefined) {
+      purchase.vatAmount = Math.round(purchase.subtotal * (purchase.vatPercent / 100) * 100) / 100;
+      purchase.total = Math.round((purchase.subtotal + purchase.vatAmount) * 100) / 100;
+    } else if (body.total !== undefined) {
+      purchase.total = Number(body.total);
     }
 
     // Convenience: receiveAll marks every line fully received

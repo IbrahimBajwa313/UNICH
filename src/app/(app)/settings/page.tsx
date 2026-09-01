@@ -319,13 +319,26 @@ export default function SettingsPage() {
                   onChange={(value) => setDraft({ ...draft, [field]: value })}
                 />
               ))}
-              <EditableRow
-                label="VAT % (price-inclusive)"
-                value={String(draft.vatPercent ?? 0)}
-                onChange={(value) =>
-                  setDraft({ ...draft, vatPercent: Number(value) || 0 })
-                }
-              />
+              <div className="flex items-center justify-between gap-4 border-b border-line/50 pb-2">
+                <dt className="text-ink-muted">
+                  VAT
+                  <span className="mt-0.5 block text-[11px] font-normal text-ink-muted/80">
+                    Shelf prices are VAT-inclusive; applies to every POS sale receipt.
+                  </span>
+                </dt>
+                <dd>
+                  <select
+                    value={draft.vatPercent > 0 ? "5" : "0"}
+                    onChange={(e) =>
+                      setDraft({ ...draft, vatPercent: Number(e.target.value) })
+                    }
+                    className="rounded border border-line bg-mist px-2 py-1 text-sm"
+                  >
+                    <option value="5">5% VAT on</option>
+                    <option value="0">VAT off</option>
+                  </select>
+                </dd>
+              </div>
               <div className="flex items-center justify-between gap-4 border-b border-line/50 pb-2">
                 <dt className="text-ink-muted">Default print format</dt>
                 <dd>

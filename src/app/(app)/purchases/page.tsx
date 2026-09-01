@@ -41,6 +41,7 @@ export default function PurchasesPage() {
     supplierId: string;
     currency: string;
     status: string;
+    vatPercent: string;
     lines: DraftLine[];
   } | null>(null);
   const [supplierDraft, setSupplierDraft] = useState<Record<string, string> | null>(null);
@@ -85,13 +86,18 @@ export default function PurchasesPage() {
       .slice(0, 6);
   }, [purchaseList]);
 
-  const draftTotal = useMemo(() => {
+  const draftSubtotal = useMemo(() => {
     if (!purchaseDraft) return 0;
     return purchaseDraft.lines.reduce(
       (s, l) => s + Number(l.qtyOrdered || 0) * Number(l.unitCost || 0),
       0,
     );
   }, [purchaseDraft]);
+  const draftVatAmount = useMemo(() => {
+    if (!purchaseDraft) return 0;
+    return Math.round(draftSubtotal * (Number(purchaseDraft.vatPercent || 0) / 100) * 100) / 100;
+  }, [draftSubtotal, purchaseDraft]);
+  const draftTotal = draftSubtotal + draftVatAmount;
 
   async function savePurchase() {
     if (!purchaseDraft?.supplierId) return;
@@ -121,6 +127,7 @@ export default function PurchasesPage() {
           supplierName: supplier.name,
           currency: purchaseDraft.currency || supplier.currency,
           status: purchaseDraft.status || "draft",
+          vatPercent: Number(purchaseDraft.vatPercent || 0),
           lines,
         }),
       });
@@ -229,6 +236,7 @@ export default function PurchasesPage() {
                     supplierId: "",
                     currency: "OMR",
                     status: "ordered",
+                    vatPercent: "5",
                     lines: [
                       { productId: "", productName: "", sku: "", qtyOrdered: "1", unitCost: "" },
                     ],
@@ -250,7 +258,7 @@ export default function PurchasesPage() {
         <Stat label="Active Suppliers" value={String(supplierList.length)} />
         <Stat label="Open Payables" value={formatMoney(outstanding)} />
         <Stat label="POs This Month" value={String(purchaseList.length)} />
-        <Stat label="Currencies" value="OMR · USD" hint="Multi-currency ready" />
+        <Stat label="Currencies" value="OMR · AED" hint="Multi-currency ready" />
       </div>
 
       {formError ? (
@@ -312,6 +320,11 @@ export default function PurchasesPage() {
                     </td>
                     <td className="px-3 py-3 text-right font-medium">
                       {formatMoney(po.total, po.currency)}
+                      {po.vatPercent > 0 ? (
+                        <p className="text-[11px] font-normal text-ink-muted">
+                          incl. {po.vatPercent}% VAT
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-5 py-3 text-right">
                       {canReceive && canWrite ? (
@@ -367,7 +380,7 @@ export default function PurchasesPage() {
             title="New Purchase"
             subtitle="Add product lines — set status to Received to create FIFO layers immediately"
           />
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
             <label className="text-xs text-ink-muted">
               Supplier
               <select
@@ -390,6 +403,11 @@ export default function PurchasesPage() {
                 ))}
               </select>
             </label>
+            <CurrencySelect
+              label="Currency"
+              value={purchaseDraft.currency}
+              onChange={(currency) => setPurchaseDraft({ ...purchaseDraft, currency })}
+            />
             <label className="text-xs text-ink-muted">
               Status
               <select
@@ -402,14 +420,38 @@ export default function PurchasesPage() {
                 <option value="received">received (apply FIFO now)</option>
               </select>
             </label>
-            <div className="flex items-end">
-              <p className="text-sm text-ink-muted">
-                Total{" "}
-                <span className="font-semibold text-ink">
-                  {formatMoney(draftTotal, purchaseDraft.currency)}
-                </span>
-              </p>
-            </div>
+            <label className="text-xs text-ink-muted">
+              VAT %
+              <select
+                value={purchaseDraft.vatPercent}
+                onChange={(e) => setPurchaseDraft({ ...purchaseDraft, vatPercent: e.target.value })}
+                className="mt-1 h-9 w-full rounded border border-line bg-mist px-2"
+              >
+                <option value="5">5% VAT</option>
+                <option value="0">No VAT</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 rounded border border-line/60 bg-mist/40 px-3 py-2 text-sm">
+            <p className="text-ink-muted">
+              Subtotal{" "}
+              <span className="font-medium text-ink">
+                {formatMoney(draftSubtotal, purchaseDraft.currency)}
+              </span>
+            </p>
+            <p className="text-ink-muted">
+              VAT ({purchaseDraft.vatPercent || 0}%){" "}
+              <span className="font-medium text-ink">
+                {formatMoney(draftVatAmount, purchaseDraft.currency)}
+              </span>
+            </p>
+            <p className="text-ink-muted">
+              Total{" "}
+              <span className="font-semibold text-ink">
+                {formatMoney(draftTotal, purchaseDraft.currency)}
+              </span>
+            </p>
           </div>
 
           <div className="mt-4 space-y-2">
@@ -489,7 +531,7 @@ export default function PurchasesPage() {
               value={supplierDraft.phone || ""}
               onChange={(phone) => setSupplierDraft({ ...supplierDraft, phone })}
             />
-            <Field
+            <CurrencySelect
               label="Currency"
               value={supplierDraft.currency || "OMR"}
               onChange={(currency) => setSupplierDraft({ ...supplierDraft, currency })}
@@ -530,6 +572,35 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/20"
       />
+    </label>
+  );
+}
+
+const CURRENCY_OPTIONS = ["OMR", "AED"];
+
+function CurrencySelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-xs text-ink-muted">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 h-9 w-full rounded border border-line bg-mist px-2 text-sm outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/20"
+      >
+        {CURRENCY_OPTIONS.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

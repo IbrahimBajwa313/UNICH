@@ -94,11 +94,14 @@ export async function POST(req: Request) {
       status = derivePurchaseStatus(lines, status as "draft" | "ordered" | "received" | "partial");
     }
 
-    const total =
+    const subtotal =
       lines.length > 0
         ? lines.reduce((s, l) => s + l.qtyOrdered * l.unitCost, 0)
-        : Number(body.total || 0);
+        : Number(body.subtotal ?? body.total ?? 0);
     const itemCount = lines.length > 0 ? lines.length : Number(body.itemCount || 0);
+    const vatPercent = Math.max(0, Number(body.vatPercent ?? 5));
+    const vatAmount = Math.round(subtotal * (vatPercent / 100) * 100) / 100;
+    const total = Math.round((subtotal + vatAmount) * 100) / 100;
 
     const purchase = await PurchaseOrder.create({
       supplierId: body.supplierId,
@@ -107,6 +110,9 @@ export async function POST(req: Request) {
       notes: body.notes,
       date: new Date(body.date || Date.now()),
       status,
+      subtotal,
+      vatPercent,
+      vatAmount,
       total,
       itemCount,
       lines,
